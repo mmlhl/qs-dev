@@ -32,3 +32,15 @@ test {
 application {
     mainClass = 'JavaToBeanShellConverter'
 }
+
+// Task to convert MyScript.java to BeanShell
+task convertScript(type: JavaExec) {
+    group = 'build'
+    description = 'Convert MyScript.java to BeanShell format (dist/main.java)'
+    classpath = sourceSets.main.runtimeClasspath
+    mainClass = 'JavaToBeanShellConverter'
+    args 'src/main/java/me/mm/qs/script/MyScript.java'
+}
+
+// Auto-convert after compileJava
+compileJava.finalizedBy convertScript
