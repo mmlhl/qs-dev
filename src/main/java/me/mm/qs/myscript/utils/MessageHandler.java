@@ -1,0 +1,66 @@
+package me.mm.qs.myscript.utils;
+
+import me.mm.qs.script.QScriptBase;
+import me.mm.qs.script.Globals;
+import me.mm.qs.script.annotation.ScriptMethods;
+import me.mm.qs.script.types.MessageData;
+
+import static me.mm.qs.script.Globals.*;
+
+/**
+ * Message handling utilities.
+ * Methods in this class will be extracted to the module file.
+ */
+@ScriptMethods
+public class MessageHandler extends QScriptBase {
+
+    /**
+     * Parse time from message like "禁言@xxx 1天"
+     */
+    public int parseTimeBymessage(MessageData msg) {
+        int timeStartIndex = msg.MessageContent.lastIndexOf(" ");
+        String date = msg.MessageContent.substring(timeStartIndex + 1);
+        date = date.trim();
+        String t = "";
+        if (date != null && !"".equals(date)) {
+            for (int i = 0; i < date.length(); i++) {
+                if (date.charAt(i) >= 48 && date.charAt(i) <= 57) {
+                    t += date.charAt(i);
+                }
+            }
+        }
+        int time = Integer.parseInt(t);
+        if (date.contains("天")) {
+            return time * 60 * 60 * 24;
+        } else if (date.contains("时") || date.contains("小时")) {
+            return 60 * 60 * time;
+        } else if (date.contains("分") || date.contains("分钟")) {
+            return 60 * time;
+        }
+        return time;
+    }
+
+    /**
+     * Check if message is a mute command
+     */
+    public boolean isMuteCommand(MessageData msg) {
+        return msg.IsSend 
+            && msg.MessageContent.matches("禁言 ?@[\\s\\S]+[0-9]+(天|分|时|小时|分钟|秒)") 
+            && msg.mAtList.size() >= 1;
+    }
+
+    /**
+     * Check if message is @me
+     */
+    public static boolean isAtMe(MessageData msg) {
+        return msg.IsSend && msg.MessageContent.contains("@" + myUin);
+    }
+
+    /**
+     * Test method - check if text contains keyword
+     */
+    public boolean containsKeyword(String text, String keyword) {
+        return text != null && text.contains(keyword);
+    }
+
+}

@@ -1,6 +1,7 @@
 plugins {
     id 'java'
     id 'application'
+    id 'idea'
 }
 
 group = 'me.mm.qs'
@@ -9,7 +10,24 @@ version = '1.0-SNAPSHOT'
 sourceSets {
     main {
         java {
-            srcDirs = ['src/main/java', 'scripts']
+            srcDirs = [
+                'src/main/java', 
+                'scripts'
+            ]
+        }
+    }
+}
+
+// Configure Java compiler to allow non-static access to utils methods
+compileJava {
+    options.encoding = 'UTF-8'
+    options.compilerArgs += ['-Xlint:none']
+    // Add utils classes to compilation classpath so Main.java can reference them
+    doFirst {
+        // Ensure utils classes are compiled first
+        def utilsFiles = fileTree(dir: 'src/main/java/me/mm/qs/myscript/utils', include: '*.java')
+        if (utilsFiles.files) {
+            println "Utils classes will be compiled first"
         }
     }
 }
@@ -36,11 +54,191 @@ application {
 // Task to convert MyScript.java to BeanShell
 task convertScript(type: JavaExec) {
     group = 'build'
-    description = 'Convert MyScript.java to BeanShell format (dist/main.java)'
+    description = 'Convert myscript package to BeanShell format (dist/)'
     classpath = sourceSets.main.runtimeClasspath
     mainClass = 'JavaToBeanShellConverter'
-    args 'src/main/java/me/mm/qs/script/MyScript.java'
+    args 'src/main/java/me/mm/qs/myscript'
+    
+    // Fix encoding for Chinese characters in console output
+    systemProperty 'file.encoding', 'UTF-8'
+    systemProperty 'sun.stdout.encoding', 'UTF-8'
+    systemProperty 'sun.stderr.encoding', 'UTF-8'
 }
 
 // Auto-convert after compileJava
 compileJava.finalizedBy convertScript
+
+// ========================================
+// Deploy Script to Android Device
+// ========================================
+// Usage:
+//   1. Connect Android device via USB
+//   2. Enable USB debugging
+//   3. Run: gradlew deployScript
+//
+// Auto-deploy: Uncomment the last line to enable auto-deployment after each build
+// ========================================
+
+// Task to deploy script to Android device via ADB
+task deployScript(type: Exec) {
+    group = 'deploy'
+    description = 'Deploy script to Android device via ADB'
+    
+    dependsOn convertScript
+    
+    doFirst {
+        // Helper function to get script name
+        def getScriptName = {
+            def scriptDirs = new File(project.projectDir, 'dist').listFiles{ it.isDirectory() && !it.name.startsWith('.') }
+            if (scriptDirs && scriptDirs.length > 0) {
+                return scriptDirs[0].name
+            }
+            throw new GradleException('No script folder found in dist/')
+        }
+        
+        // Helper function to check ADB
+        def checkADB = {
+            def adbCheck = new ByteArrayOutputStream()
+            project.exec {
+                commandLine 'adb', 'devices'
+                standardOutput = adbCheck
+                errorOutput = new ByteArrayOutputStream()
+                ignoreExitValue = true
+            }
+            
+            def devicesList = adbCheck.toString().trim()
+            if (!devicesList.contains('device') || devicesList.split('\n').size() < 2) {
+                println "\n⚠️  No Android device detected!"
+                println "Please connect your device and enable USB debugging."
+                throw new StopExecutionException()
+            }
+        }
+        
+        try {
+            checkADB()
+        } catch (Exception e) {
+            println "\n⚠️  ADB not found or device not connected!"
+            throw new StopExecutionException()
+        }
+        
+        def scriptName = getScriptName()
+        def scriptDir = new File(project.projectDir, "dist/${scriptName}")
+        def targetPath = "/storage/emulated/0/Android/data/com.tencent.mobileqq/QStory/Plugin/${scriptName}"
+        
+        println "\n📱 Deploying script: ${scriptName}"
+        println "Creating directory: ${targetPath}"
+        
+        project.exec {
+            commandLine 'adb', 'shell', 'mkdir', '-p', targetPath
+            ignoreExitValue = true
+        }
+        
+        // Push all files from dist/scriptName to target directory
+        println "\nPushing files:"
+        fileTree(dir: scriptDir, include: '**/*').each { file ->
+            if (file.isFile()) {
+                def relativePath = scriptDir.toPath().relativize(file.toPath()).toString().replace('\\', '/')
+                def targetFile = "${targetPath}/${relativePath}"
+                
+                println "  ✓ ${relativePath}"
+                project.exec {
+                    commandLine 'adb', 'push', file.absolutePath, targetFile
+                    standardOutput = new ByteArrayOutputStream()
+                    errorOutput = new ByteArrayOutputStream()
+                }
+            }
+        }
+        
+        // Create and push empty error.txt
+        def emptyErrorFile = new File(project.projectDir, 'build/tmp/error.txt')
+        emptyErrorFile.parentFile.mkdirs()
+        emptyErrorFile.text = ''
+        println "  ✓ error.txt (empty)"
+        project.exec {
+            commandLine 'adb', 'push', emptyErrorFile.absolutePath, "${targetPath}/error.txt"
+            standardOutput = new ByteArrayOutputStream()
+            errorOutput = new ByteArrayOutputStream()
+        }
+        
+        println "\n✅ Deployment completed successfully!"
+        println "📂 Script deployed to: ${targetPath}"
+    }
+    
+    commandLine 'cmd', '/c', 'echo.'
+}
+
+// Optional: Auto-deploy after successful conversion (comment out if not needed)
+// convertScript.finalizedBy deployScript
+
+// Task to fetch error.txt from Android device
+task fetchError(type: Exec) {
+    group = 'deploy'
+    description = 'Fetch error.txt from Android device for analysis'
+    
+    doFirst {
+        // Reuse helper functions
+        def getScriptName = {
+            def scriptDirs = new File(project.projectDir, 'dist').listFiles{ it.isDirectory() && !it.name.startsWith('.') }
+            if (scriptDirs && scriptDirs.length > 0) {
+                return scriptDirs[0].name
+            }
+            throw new GradleException('No script folder found in dist/')
+        }
+        
+        def checkADB = {
+            def adbCheck = new ByteArrayOutputStream()
+            project.exec {
+                commandLine 'adb', 'devices'
+                standardOutput = adbCheck
+                errorOutput = new ByteArrayOutputStream()
+                ignoreExitValue = true
+            }
+            
+            def devicesList = adbCheck.toString().trim()
+            if (!devicesList.contains('device') || devicesList.split('\n').size() < 2) {
+                println "\n⚠️  No Android device detected!"
+                println "Please connect your device and enable USB debugging."
+                throw new StopExecutionException()
+            }
+        }
+        
+        try {
+            checkADB()
+        } catch (Exception e) {
+            println "\n⚠️  ADB not found or device not connected!"
+            throw new StopExecutionException()
+        }
+        
+        def scriptName = getScriptName()
+        def sourcePath = "/storage/emulated/0/Android/data/com.tencent.mobileqq/QStory/Plugin/${scriptName}/error.txt"
+        def targetFile = new File(project.projectDir, 'error.txt')
+        
+        println "\n📥 Fetching error.txt from: ${scriptName}"
+        println "Source: ${sourcePath}"
+        
+        def pullExec = project.exec {
+            commandLine 'adb', 'pull', sourcePath, targetFile.absolutePath
+            standardOutput = new ByteArrayOutputStream()
+            errorOutput = new ByteArrayOutputStream()
+            ignoreExitValue = true
+        }
+        
+        if (pullExec.exitValue == 0) {
+            println "✅ Error file fetched successfully!"
+            println "📂 Saved to: ${targetFile.absolutePath}"
+            
+            if (targetFile.exists() && targetFile.length() > 0) {
+                println "\n📄 Error file content:"
+                println "=" * 60
+                println targetFile.text
+                println "=" * 60
+            } else {
+                println "\n✓ No errors found (file is empty)"
+            }
+        } else {
+            println "\n⚠️  Error file not found on device (script may not have errors)"
+        }
+    }
+    
+    commandLine 'cmd', '/c', 'echo.'
+}

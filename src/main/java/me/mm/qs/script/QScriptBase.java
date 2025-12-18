@@ -2,28 +2,21 @@ package me.mm.qs.script;
 
 import android.content.Context;
 import me.mm.qs.script.types.*;
+import static me.mm.qs.script.Globals.*;
 
 import java.util.ArrayList;
 import java.util.Map;
 
 /**
  * QStory Script Base Class for IDE hint support.
- * This class defines all global variables and methods available in the QStory Beanshell environment.
+ * This class defines all methods available in the QStory Beanshell environment.
+ * Global variables are now in Globals.java.
  * Actual script logic should be written in classes extending this base class.
  */
 public abstract class QScriptBase {
 
-    // --- Global Variables ---
-    /** Current user's QQ number */
-    public String myUin;
-    /** QQ global context object */
-    public Context context;
-    /** Script runtime directory */
-    public String appPath;
-    /** QQ's class loader */
-    public ClassLoader loader;
-    /** Current script ID */
-    public String pluginID;
+    // Global variables are now in Globals.java - imported via static import
+    // Access them directly: myUin, context, appPath, loader, pluginID
 
     // --- Callback Methods (to be overridden by scripts) ---
 

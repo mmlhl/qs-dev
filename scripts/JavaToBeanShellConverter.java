@@ -4,7 +4,12 @@ import com.github.javaparser.ParserConfiguration;
 import com.github.javaparser.ast.CompilationUnit;
 import com.github.javaparser.ast.body.ClassOrInterfaceDeclaration;
 import com.github.javaparser.ast.body.MethodDeclaration;
+import com.github.javaparser.ast.body.FieldDeclaration;
 import com.github.javaparser.ast.body.Parameter;
+import com.github.javaparser.ast.expr.AnnotationExpr;
+import com.github.javaparser.ast.expr.MemberValuePair;
+import com.github.javaparser.ast.expr.MethodCallExpr;
+import com.github.javaparser.ast.expr.FieldAccessExpr;
 import com.github.javaparser.ast.type.Type;
 import com.github.javaparser.ast.type.ClassOrInterfaceType;
 import com.github.javaparser.ast.stmt.Statement;
@@ -18,8 +23,16 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.time.LocalDate;
+import java.time.format.DateTimeFormatter;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.util.HashSet;
 import java.util.Set;
+import java.util.List;
+import java.util.ArrayList;
+import java.util.UUID;
+import java.util.Properties;
 import java.util.stream.Collectors;
 
 /**
@@ -28,7 +41,8 @@ import java.util.stream.Collectors;
  * - Converts @BeanShellType annotated types to Object
  * - Extracts methods from @ScriptMethods annotated classes to root level
  * - Removes annotations (BeanShell doesn't support them)
- * - Outputs to dist/main.java
+ * - Recursively converts all Java files in subdirectories
+ * - Outputs main.java and module files to dist/
  */
 public class JavaToBeanShellConverter {
 
@@ -45,15 +59,20 @@ public class JavaToBeanShellConverter {
 
     public static void main(String[] args) throws IOException {
         if (args.length < 1) {
-            System.err.println("Usage: java JavaToBeanShellConverter <input-java-file>");
+            System.err.println("Usage: java JavaToBeanShellConverter <script-package-dir>");
             System.exit(1);
         }
 
-        String inputFilePath = args[0];
-        Path inputPath = Paths.get(inputFilePath);
+        String scriptPackageDir = args[0];
+        Path scriptPath = Paths.get(scriptPackageDir);
         
-        // Create dist directory
-        Path projectRoot = inputPath.getParent();
+        if (!Files.isDirectory(scriptPath)) {
+            System.err.println("Error: " + scriptPackageDir + " is not a directory");
+            System.exit(1);
+        }
+        
+        // Find project root
+        Path projectRoot = scriptPath;
         while (projectRoot != null && !Files.exists(projectRoot.resolve("build.gradle"))) {
             projectRoot = projectRoot.getParent();
         }
@@ -61,19 +80,146 @@ public class JavaToBeanShellConverter {
             projectRoot = Paths.get(".");
         }
         
-        Path distDir = projectRoot.resolve("dist");
-        Files.createDirectories(distDir);
-        String outputFilePath = distDir.resolve("main.java").toString();
+        // Get script name from @ScriptInfo annotation
+        Path mainFile = scriptPath.resolve("Main.java");
+        String scriptName = getScriptName(mainFile);
         
-        FileInputStream in = new FileInputStream(inputFilePath);
+        // Create dist/scriptName directory structure
+        Path distRoot = projectRoot.resolve("dist");
+        Path scriptDir = distRoot.resolve(scriptName);
+        Files.createDirectories(scriptDir);
+        
+        // Convert Main.java to scriptName/main.java
+        if (Files.exists(mainFile)) {
+            String mainOutput = convertFile(mainFile, projectRoot, scriptPath);
+            Path mainOutputPath = scriptDir.resolve("main.java");
+            Files.writeString(mainOutputPath, mainOutput);
+            System.out.println("Generated: " + mainOutputPath);
+            
+            // Generate script metadata files (desc.txt and info.prop) in scriptName folder
+            generateScriptMetadata(mainFile, scriptDir, distRoot, scriptPath, scriptName);
+        } else {
+            System.err.println("Warning: Main.java not found in " + scriptPackageDir);
+        }
+        
+        // Recursively convert all subdirectories to scriptName folder
+        convertDirectory(scriptPath, scriptDir, projectRoot, scriptPath);
+        
+        System.out.println("\nConversion successful!");
+        System.out.println("Script output: " + scriptDir);
+    }
+
+    /**
+     * Convert a method declaration to BeanShell format:
+     * - Replace @BeanShellType types with Object
+     * - Remove all annotations
+     * - Remove 'static' modifier (BeanShell methods are instance methods)
+     * - Convert messageHandler.method() to method()
+     * - Keep method signature and body
+     */
+    private static String convertMethod(MethodDeclaration method, PrettyPrinter printer) {
+        // Clone the method to avoid modifying the original AST
+        MethodDeclaration converted = method.clone();
+
+        // Remove all annotations
+        converted.getAnnotations().clear();
+        
+        // Remove 'static' modifier
+        converted.setStatic(false);
+
+        // Convert return type if needed
+        Type returnType = converted.getType();
+        convertTypeToObject(returnType);
+
+        // Convert parameter types if needed
+        for (Parameter param : converted.getParameters()) {
+            convertTypeToObject(param.getType());
+        }
+        
+        // Convert method calls: messageHandler.xxx() -> xxx(), helper.xxx() -> xxx()
+        // Also convert Globals.xxx -> xxx
+        if (converted.getBody().isPresent()) {
+            converted.getBody().get().findAll(MethodCallExpr.class).forEach(methodCall -> {
+                if (methodCall.getScope().isPresent()) {
+                    var scope = methodCall.getScope().get();
+                    // Check if it's messageHandler.xxx() or helper.xxx()
+                    if (scope.isNameExpr()) {
+                        String scopeName = scope.asNameExpr().getNameAsString();
+                        if (scopeName.equals("messageHandler") || scopeName.equals("helper")) {
+                            // Remove the scope, making it a direct function call
+                            methodCall.removeScope();
+                        }
+                    }
+                }
+            });
+            
+            // Convert Globals.xxx to xxx (global variables)
+            converted.getBody().get().findAll(FieldAccessExpr.class).forEach(fieldAccess -> {
+                if (fieldAccess.getScope().isNameExpr()) {
+                    String scopeName = fieldAccess.getScope().asNameExpr().getNameAsString();
+                    if (scopeName.equals("Globals")) {
+                        // Replace Globals.myUin with just myUin
+                        fieldAccess.replace(fieldAccess.getNameAsExpression());
+                    }
+                }
+            });
+        }
+
+        return printer.print(converted);
+    }
+
+    /**
+     * Recursively convert all Java files in subdirectories
+     */
+    private static void convertDirectory(Path sourceDir, Path distDir, Path projectRoot, Path scriptRoot) throws IOException {
+        Files.list(sourceDir)
+            .filter(Files::isDirectory)
+            .forEach(subDir -> {
+                try {
+                    String relativePath = scriptRoot.relativize(subDir).toString();
+                    Path outputDir = distDir.resolve(relativePath);
+                    Files.createDirectories(outputDir);
+                    
+                    // Convert all Java files in this directory (except Bridge classes)
+                    Files.list(subDir)
+                        .filter(file -> file.toString().endsWith(".java"))
+                        .filter(file -> !file.getFileName().toString().endsWith("Bridge.java"))
+                        .forEach(javaFile -> {
+                            try {
+                                String fileName = javaFile.getFileName().toString();
+                                String content = convertFile(javaFile, projectRoot, scriptRoot);
+                                Path outputFile = outputDir.resolve(fileName);
+                                Files.writeString(outputFile, content);
+                                System.out.println("Generated: " + outputFile);
+                            } catch (IOException e) {
+                                System.err.println("Error converting " + javaFile + ": " + e.getMessage());
+                            }
+                        });
+                    
+                    // Recursively process subdirectories
+                    convertDirectory(subDir, distDir, projectRoot, scriptRoot);
+                } catch (IOException e) {
+                    System.err.println("Error processing directory " + subDir + ": " + e.getMessage());
+                }
+            });
+    }
+
+    /**
+     * Convert a single Java file to BeanShell format
+     */
+    private static String convertFile(Path javaFile, Path projectRoot, Path scriptRoot) throws IOException {
+        FileInputStream in = new FileInputStream(javaFile.toFile());
         
         // Parse the Java file
         ParserConfiguration parserConfig = new ParserConfiguration();
         ParseResult<CompilationUnit> parseResult = new JavaParser(parserConfig).parse(in);
+        in.close();
+        
         if (!parseResult.isSuccessful()) {
-            System.err.println("Failed to parse the Java file.");
-            parseResult.getProblems().forEach(System.err::println);
-            System.exit(1);
+            throw new IOException("Failed to parse " + javaFile + ": " + 
+                parseResult.getProblems().stream()
+                    .map(Object::toString)
+                    .collect(Collectors.joining(", ")));
         }
         
         CompilationUnit cu = parseResult.getResult().get();
@@ -85,7 +231,19 @@ public class JavaToBeanShellConverter {
 
         StringBuilder beanShellCode = new StringBuilder();
         beanShellCode.append("// Generated BeanShell Script\n");
-        beanShellCode.append("// DO NOT EDIT THIS FILE DIRECTLY - Edit the source Java file instead\n\n");
+        beanShellCode.append("// Source: ").append(scriptRoot.relativize(javaFile)).append("\n");
+        beanShellCode.append("// DO NOT EDIT THIS FILE DIRECTLY\n\n");
+
+        // Extract and convert static imports to load() calls (only for Main.java)
+        if (javaFile.getFileName().toString().equals("Main.java")) {
+            List<String> loadStatements = extractLoadStatements(cu, projectRoot, scriptRoot);
+            if (!loadStatements.isEmpty()) {
+                for (String loadStmt : loadStatements) {
+                    beanShellCode.append(loadStmt).append("\n");
+                }
+                beanShellCode.append("\n");
+            }
+        }
 
         // Process all classes annotated with @ScriptMethods
         cu.findAll(ClassOrInterfaceDeclaration.class).forEach(classDecl -> {
@@ -93,6 +251,9 @@ public class JavaToBeanShellConverter {
                     .anyMatch(anno -> anno.getNameAsString().equals("ScriptMethods"));
 
             if (hasScriptMethodsAnnotation) {
+                // Skip utility instance fields (messageHandler, helper, etc.)
+                // These are only for IDE support and not needed in BeanShell
+                
                 // Extract all methods from this class
                 classDecl.getMethods().forEach(method -> {
                     // Check if this method has @RootCode annotation
@@ -116,38 +277,217 @@ public class JavaToBeanShellConverter {
             }
         });
 
-        // Write the result to dist/main.java
-        try (FileWriter writer = new FileWriter(outputFilePath)) {
-            writer.write(beanShellCode.toString());
-        }
-        
-        System.out.println("Conversion successful!");
-        System.out.println("Output written to: " + outputFilePath);
+        return beanShellCode.toString();
     }
 
     /**
-     * Convert a method declaration to BeanShell format:
-     * - Replace @BeanShellType types with Object
-     * - Remove all annotations
-     * - Keep method signature and body
+     * Extract imports from myscript.utils package and convert to load() statements
      */
-    private static String convertMethod(MethodDeclaration method, PrettyPrinter printer) {
-        // Clone the method to avoid modifying the original AST
-        MethodDeclaration converted = method.clone();
+    private static List<String> extractLoadStatements(CompilationUnit cu, Path projectRoot, Path scriptRoot) {
+        List<String> loadStatements = new ArrayList<>();
+        
+        cu.getImports().forEach(importDecl -> {
+            String importName = importDecl.getNameAsString();
+            // Skip Globals static import (these become global variables in BeanShell)
+            if (importDecl.isStatic() && importName.startsWith("me.mm.qs.script.Globals")) {
+                return;
+            }
+            // Check if it's from myscript.utils package (regular import, not static)
+            if (!importDecl.isStatic() && importName.startsWith("me.mm.qs.myscript.utils.")) {
+                // Extract class name: me.mm.qs.myscript.utils.MessageHandler -> MessageHandler
+                String className = importName.substring("me.mm.qs.myscript.utils.".length());
+                
+                // Convert to load() call with appPath
+                String loadCall = String.format("load(appPath + \"/utils/%s.java\");", className);
+                loadStatements.add(loadCall);
+            }
+        });
+        
+        return loadStatements;
+    }
 
-        // Remove all annotations
-        converted.getAnnotations().clear();
-
-        // Convert return type if needed
-        Type returnType = converted.getType();
-        convertTypeToObject(returnType);
-
-        // Convert parameter types if needed
-        for (Parameter param : converted.getParameters()) {
-            convertTypeToObject(param.getType());
+    /**
+     * Generate script metadata files (desc.txt and info.prop)
+     */
+    private static void generateScriptMetadata(Path mainFile, Path scriptDir, Path distRoot, Path scriptRoot, String scriptName) throws IOException {
+        FileInputStream in = new FileInputStream(mainFile.toFile());
+        ParseResult<CompilationUnit> parseResult = new JavaParser(new ParserConfiguration()).parse(in);
+        in.close();
+        
+        if (!parseResult.isSuccessful()) {
+            System.err.println("Warning: Failed to parse Main.java for metadata extraction");
+            return;
         }
+        
+        CompilationUnit cu = parseResult.getResult().get();
+        
+        // Find class with @ScriptInfo annotation
+        for (ClassOrInterfaceDeclaration classDecl : cu.findAll(ClassOrInterfaceDeclaration.class)) {
+            for (AnnotationExpr annotation : classDecl.getAnnotations()) {
+                if (annotation.getNameAsString().equals("ScriptInfo")) {
+                    generateMetadataFiles(annotation, scriptDir, distRoot, scriptRoot);
+                    return;
+                }
+            }
+        }
+        
+        System.out.println("Warning: No @ScriptInfo annotation found, skipping metadata generation");
+    }
+    
+    /**
+     * Get script name from @ScriptInfo annotation
+     */
+    private static String getScriptName(Path mainFile) throws IOException {
+        if (!Files.exists(mainFile)) {
+            return "UnnamedScript";
+        }
+        
+        FileInputStream in = new FileInputStream(mainFile.toFile());
+        ParseResult<CompilationUnit> parseResult = new JavaParser(new ParserConfiguration()).parse(in);
+        in.close();
+        
+        if (!parseResult.isSuccessful()) {
+            return "UnnamedScript";
+        }
+        
+        CompilationUnit cu = parseResult.getResult().get();
+        for (ClassOrInterfaceDeclaration classDecl : cu.findAll(ClassOrInterfaceDeclaration.class)) {
+            for (AnnotationExpr annotation : classDecl.getAnnotations()) {
+                if (annotation.getNameAsString().equals("ScriptInfo")) {
+                    String name = getAnnotationValue(annotation, "name", "UnnamedScript");
+                    return name;
+                }
+            }
+        }
+        
+        return "UnnamedScript";
+    }
+    
+    /**
+     * Generate desc.txt and info.prop from @ScriptInfo annotation
+     */
+    private static void generateMetadataFiles(AnnotationExpr scriptInfo, Path scriptDir, Path distRoot, Path scriptRoot) throws IOException {
+        String name = getAnnotationValue(scriptInfo, "name", "Untitled Script");
+        String author = getAnnotationValue(scriptInfo, "author", "Unknown");
+        String version = getAnnotationValue(scriptInfo, "version", "1.0");
+        String description = getAnnotationValue(scriptInfo, "description", "");
+        String tags = getAnnotationValue(scriptInfo, "tags", "功能扩展");
+        String idFromAnnotation = getAnnotationValue(scriptInfo, "id", "");
+        
+        // Generate or load script ID from dist root (not in script folder)
+        Path scriptIdFile = distRoot.resolve(".script-id");
+        String scriptId;
+        
+        if (Files.exists(scriptIdFile)) {
+            // Load existing ID
+            scriptId = Files.readString(scriptIdFile).trim();
+            System.out.println("Using existing script ID: " + scriptId);
+        } else {
+            // Generate new ID (32-char hex string like MD5)
+            if (!idFromAnnotation.isEmpty()) {
+                scriptId = idFromAnnotation;
+            } else {
+                scriptId = generateScriptId(name, author);
+            }
+            Files.writeString(scriptIdFile, scriptId);
+            System.out.println("Generated new script ID: " + scriptId);
+        }
+        
+        // Generate desc.txt in script folder
+        Path descFile = scriptDir.resolve("desc.txt");
+        Files.writeString(descFile, description);
+        System.out.println("Generated: " + descFile);
+        
+        // Generate info.prop in script folder
+        Path infoPropFile = scriptDir.resolve("info.prop");
+        try (FileWriter writer = new FileWriter(infoPropFile.toFile())) {
+            // Write properties in specific order
+            writer.write("name=" + name + "\n");
+            writer.write("type=1\n");
+            writer.write("version=" + version + "\n");
+            writer.write("author=" + author + "\n");
+            writer.write("id=" + scriptId + "\n");
+            writer.write("date=" + LocalDate.now().format(DateTimeFormatter.ofPattern("yyyy-MM-d")) + "\n");
+            writer.write("tags=" + tags + "\n");
+        }
+        System.out.println("Generated: " + infoPropFile);
+    }
+    
+    /**
+     * Extract annotation value
+     */
+    private static String getAnnotationValue(AnnotationExpr annotation, String key, String defaultValue) {
+        if (annotation.isSingleMemberAnnotationExpr()) {
+            return annotation.asSingleMemberAnnotationExpr()
+                    .getMemberValue()
+                    .toString()
+                    .replaceAll("^\"|\"$", "");
+        }
+        
+        if (annotation.isNormalAnnotationExpr()) {
+            for (MemberValuePair pair : annotation.asNormalAnnotationExpr().getPairs()) {
+                if (pair.getNameAsString().equals(key)) {
+                    String value = pair.getValue().toString();
+                    
+                    // Handle concatenated strings: "text1" + "text2" + ...
+                    if (value.contains(" + ")) {
+                        // Split by + and clean each part
+                        String[] parts = value.split("\\s*\\+\\s*");
+                        StringBuilder result = new StringBuilder();
+                        for (String part : parts) {
+                            String cleaned = part.trim().replaceAll("^\"|\"$", "");
+                            result.append(cleaned);
+                        }
+                        value = result.toString();
+                    } else {
+                        // Single string, just remove quotes
+                        value = value.replaceAll("^\"|\"$", "");
+                    }
+                    
+                    // Handle escape sequences
+                    value = value.replace("\\n", "\n");
+                    value = value.replace("\\t", "\t");
+                    
+                    return value;
+                }
+            }
+        }
+        
+        return defaultValue;
+    }
 
-        return printer.print(converted);
+    /**
+     * Generate a unique 32-character script ID (MD5-like format)
+     * Based on script name, author, and timestamp to ensure uniqueness
+     */
+    private static String generateScriptId(String name, String author) {
+        try {
+            // Combine multiple sources to ensure uniqueness:
+            // 1. Script name and author (for consistency)
+            // 2. Current timestamp (for uniqueness)
+            // 3. Random UUID (for collision prevention)
+            String seed = name + "|" + author + "|" + 
+                         System.currentTimeMillis() + "|" + 
+                         UUID.randomUUID().toString();
+            
+            MessageDigest md = MessageDigest.getInstance("MD5");
+            byte[] hash = md.digest(seed.getBytes("UTF-8"));
+            
+            // Convert to 32-char hex string
+            StringBuilder hexString = new StringBuilder();
+            for (byte b : hash) {
+                String hex = Integer.toHexString(0xff & b);
+                if (hex.length() == 1) {
+                    hexString.append('0');
+                }
+                hexString.append(hex);
+            }
+            
+            return hexString.toString();
+        } catch (NoSuchAlgorithmException | java.io.UnsupportedEncodingException e) {
+            // Fallback to UUID-based ID if MD5 is not available
+            return UUID.randomUUID().toString().replace("-", "");
+        }
     }
 
     /**
