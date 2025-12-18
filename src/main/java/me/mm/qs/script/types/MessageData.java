@@ -5,12 +5,13 @@ import me.mm.qs.script.annotation.BeanShellType;
 import java.util.ArrayList;
 
 /**
- * Message data structure with IDE hints.
- * This will be converted to Object in BeanShell.
+ * 消息数据结构,提供IDE代码提示。
+ * 在BeanShell中将被转换为Object类型。
  */
 @BeanShellType
 public class MessageData {
-    /** 消息内容（文本、图片下载地址、语音MD5、卡片代码） */
+    
+    /** 消息内容(文本、图片下载地址、语音MD5、卡片代码) */
     public String MessageContent;
     
     /** 群号（仅在群消息、私聊消息和频道消息时有效） */
@@ -22,7 +23,7 @@ public class MessageData {
     /** 发送者QQ号 */
     public String UserUin;
     
-    /** 消息类型（1: 文字/图片；2: 卡片；3: 图文；4: 语音；5: 文件；6: 回复） */
+    /** 消息类型 (使用 MessageType 常量: TEXT_OR_IMAGE=1, CARD=2, MIXED_MEDIA=3, VOICE=4, FILE=5, REPLY=6) */
     public int MessageType;
     
     /** 是否群组消息（仅在群聊消息和频道消息时为 true） */

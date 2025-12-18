@@ -1,9 +1,9 @@
 package me.mm.qs.myscript.utils;
 
 import me.mm.qs.script.QScriptBase;
-import me.mm.qs.script.Globals;
 import me.mm.qs.script.annotation.ScriptMethods;
 import me.mm.qs.script.types.MessageData;
+import me.mm.qs.myscript.constants.MessageType;
 
 import static me.mm.qs.script.Globals.*;
 
@@ -61,6 +61,28 @@ public class MessageHandler extends QScriptBase {
      */
     public boolean containsKeyword(String text, String keyword) {
         return text != null && text.contains(keyword);
+    }
+    
+    /**
+     * 示例: 根据消息类型处理不同逻辑
+     */
+    public String getMessageTypeDesc(MessageData msg) {
+        switch (msg.MessageType) {
+            case MessageType.TEXT_OR_IMAGE:
+                return "文字或图片消息";
+            case MessageType.CARD:
+                return "卡片消息";
+            case MessageType.MIXED_MEDIA:
+                return "图文消息";
+            case MessageType.VOICE:
+                return "语音消息";
+            case MessageType.FILE:
+                return "文件消息";
+            case MessageType.REPLY:
+                return "回复消息";
+            default:
+                return "未知类型";
+        }
     }
 
 }

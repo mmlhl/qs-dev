@@ -1,5 +1,6 @@
 package me.mm.qs.myscript;
 
+import me.mm.qs.myscript.constants.MessageType;
 import me.mm.qs.script.QScriptBase;
 import me.mm.qs.script.annotation.RootCode;
 import me.mm.qs.script.annotation.ScriptMethods;
@@ -7,6 +8,7 @@ import me.mm.qs.script.annotation.ScriptInfo;
 import me.mm.qs.script.types.MessageData;
 import me.mm.qs.myscript.utils.MessageHandler;
 import me.mm.qs.myscript.utils.Helper;
+
 import static me.mm.qs.script.Globals.*;
 
 /**
@@ -35,7 +37,6 @@ public class Main extends QScriptBase {
     // Callback methods - will be extracted to root level in BeanShell
     @Override
     public void onMsg(MessageData msg) {
-
         // Now you have full IDE hints!
         String text = msg.MessageContent;
         String qq = msg.UserUin;
@@ -63,6 +64,9 @@ public class Main extends QScriptBase {
         if ("私聊我".equals(text)) {
             sendMsg(qun, qq, "我已经私聊你咯");
         }
+        if ("回表情".equals(text)) {
+            replyEmoji(msg, "1");
+        }
         
         // 测试新增的工具方法
         if (messageHandler.containsKeyword(text, "测试")) {
@@ -87,12 +91,25 @@ public class Main extends QScriptBase {
     public void onCreateMenu(MessageData msg) {
         if (msg.IsGroup) {
             addMenuItem("仅群", "showGroup");
+            addMenuItem("保存", "saveVoice");
+
         }
+
     }
 
     // Custom menu callback
     public void showGroup(MessageData msg) {
-        toast("提示在" + msg.GroupUin);
+        toast("提示在" + msg.MessageType);
+    }
+
+    // Custom menu callback
+    public void saveVoice(MessageData msg) {
+        MessageType type =new MessageType();
+        toast(""+type.VOICE);
+
+        if (msg.MessageType == type.VOICE) {
+            toast(msg.LocalPath);
+        }
     }
 
     // Floating window menu callback - parameters: groupUin, uin, chatType

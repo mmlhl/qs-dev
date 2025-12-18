@@ -2,6 +2,7 @@ package me.mm.qs.myscript.utils;
 
 import me.mm.qs.script.QScriptBase;
 import me.mm.qs.script.annotation.ScriptMethods;
+import me.mm.qs.myscript.enums.ChatType;
 
 /**
  * General helper utilities.

@@ -18,16 +18,16 @@ sourceSets {
     }
 }
 
-// Configure Java compiler to allow non-static access to utils methods
+// 配置Java编译器允许非静态访问工具方法
 compileJava {
     options.encoding = 'UTF-8'
     options.compilerArgs += ['-Xlint:none']
-    // Add utils classes to compilation classpath so Main.java can reference them
+    // 将工具类添加到编译类路径,使Main.java可以引用它们
     doFirst {
-        // Ensure utils classes are compiled first
+        // 确保工具类首先被编译
         def utilsFiles = fileTree(dir: 'src/main/java/me/mm/qs/myscript/utils', include: '*.java')
         if (utilsFiles.files) {
-            println "Utils classes will be compiled first"
+            println "工具类将优先编译"
         }
     }
 }
@@ -51,52 +51,53 @@ application {
     mainClass = 'JavaToBeanShellConverter'
 }
 
-// Task to convert MyScript.java to BeanShell
+// 将MyScript.java转换为BeanShell的任务
 task convertScript(type: JavaExec) {
     group = 'build'
-    description = 'Convert myscript package to BeanShell format (dist/)'
+    description = '将myscript包转换为BeanShell格式(输出到dist/)'
     classpath = sourceSets.main.runtimeClasspath
     mainClass = 'JavaToBeanShellConverter'
     args 'src/main/java/me/mm/qs/myscript'
     
-    // Fix encoding for Chinese characters in console output
+    // 修复控制台输出中文字符的编码问题
     systemProperty 'file.encoding', 'UTF-8'
     systemProperty 'sun.stdout.encoding', 'UTF-8'
     systemProperty 'sun.stderr.encoding', 'UTF-8'
 }
 
-// Auto-convert after compileJava
+// 在compileJava之后自动转换
 compileJava.finalizedBy convertScript
 
 // ========================================
-// Deploy Script to Android Device
+// 部署脚本到Android设备
 // ========================================
-// Usage:
-//   1. Connect Android device via USB
-//   2. Enable USB debugging
-//   3. Run: gradlew deployScript
+// 使用方法:
+//   1. 通过USB连接Android设备
+//   2. 启用USB调试
+//   3. 运行: gradlew deployScript
 //
-// Auto-deploy: Uncomment the last line to enable auto-deployment after each build
+// 自动部署: 取消注释最后一行以启用每次构建后自动部署
 // ========================================
 
-// Task to deploy script to Android device via ADB
+// 通过ADB将脚本部署到Android设备的任务
 task deployScript(type: Exec) {
     group = 'deploy'
-    description = 'Deploy script to Android device via ADB'
+    description = '通过ADB将脚本部署到Android设备'
     
     dependsOn convertScript
     
     doFirst {
-        // Helper function to get script name
+        // 辅助函数:获取脚本名称
         def getScriptName = {
-            def scriptDirs = new File(project.projectDir, 'dist').listFiles{ it.isDirectory() && !it.name.startsWith('.') }
+            def distDir = new File(project.projectDir, 'dist')
+            def scriptDirs = distDir.listFiles({ File f -> f.isDirectory() && !f.name.startsWith('.') } as FileFilter)
             if (scriptDirs && scriptDirs.length > 0) {
                 return scriptDirs[0].name
             }
-            throw new GradleException('No script folder found in dist/')
+            throw new GradleException('在dist/目录中未找到脚本文件夹')
         }
         
-        // Helper function to check ADB
+        // 辅助函数:检查ADB
         def checkADB = {
             def adbCheck = new ByteArrayOutputStream()
             project.exec {
@@ -108,8 +109,8 @@ task deployScript(type: Exec) {
             
             def devicesList = adbCheck.toString().trim()
             if (!devicesList.contains('device') || devicesList.split('\n').size() < 2) {
-                println "\n⚠️  No Android device detected!"
-                println "Please connect your device and enable USB debugging."
+                println "\n⚠️  未检测到Android设备!"
+                println "请连接您的设备并启用USB调试。"
                 throw new StopExecutionException()
             }
         }
@@ -117,7 +118,7 @@ task deployScript(type: Exec) {
         try {
             checkADB()
         } catch (Exception e) {
-            println "\n⚠️  ADB not found or device not connected!"
+            println "\n⚠️  未找到ADB或设备未连接!"
             throw new StopExecutionException()
         }
         
@@ -125,16 +126,16 @@ task deployScript(type: Exec) {
         def scriptDir = new File(project.projectDir, "dist/${scriptName}")
         def targetPath = "/storage/emulated/0/Android/data/com.tencent.mobileqq/QStory/Plugin/${scriptName}"
         
-        println "\n📱 Deploying script: ${scriptName}"
-        println "Creating directory: ${targetPath}"
+        println "\n📱 正在部署脚本: ${scriptName}"
+        println "创建目录: ${targetPath}"
         
         project.exec {
             commandLine 'adb', 'shell', 'mkdir', '-p', targetPath
             ignoreExitValue = true
         }
         
-        // Push all files from dist/scriptName to target directory
-        println "\nPushing files:"
+        // 将dist/scriptName中的所有文件推送到目标目录
+        println "\n推送文件:"
         fileTree(dir: scriptDir, include: '**/*').each { file ->
             if (file.isFile()) {
                 def relativePath = scriptDir.toPath().relativize(file.toPath()).toString().replace('\\', '/')
@@ -149,40 +150,42 @@ task deployScript(type: Exec) {
             }
         }
         
-        // Create and push empty error.txt
+        // 创建并推送空的error.txt
         def emptyErrorFile = new File(project.projectDir, 'build/tmp/error.txt')
         emptyErrorFile.parentFile.mkdirs()
         emptyErrorFile.text = ''
-        println "  ✓ error.txt (empty)"
+        println "  ✓ error.txt (空文件)"
         project.exec {
             commandLine 'adb', 'push', emptyErrorFile.absolutePath, "${targetPath}/error.txt"
             standardOutput = new ByteArrayOutputStream()
             errorOutput = new ByteArrayOutputStream()
         }
         
-        println "\n✅ Deployment completed successfully!"
-        println "📂 Script deployed to: ${targetPath}"
+        println "\n✅ 部署成功完成!"
+        println "📂 脚本已部署到: ${targetPath}"
     }
     
     commandLine 'cmd', '/c', 'echo.'
 }
 
-// Optional: Auto-deploy after successful conversion (comment out if not needed)
-// convertScript.finalizedBy deployScript
 
-// Task to fetch error.txt from Android device
+// 可选: 转换成功后自动部署(不需要时注释掉)
+convertScript.finalizedBy deployScript
+
+// 从Android设备获取error.txt的任务
 task fetchError(type: Exec) {
     group = 'deploy'
-    description = 'Fetch error.txt from Android device for analysis'
+    description = '从Android设备获取error.txt用于分析'
     
     doFirst {
-        // Reuse helper functions
+        // 复用辅助函数
         def getScriptName = {
-            def scriptDirs = new File(project.projectDir, 'dist').listFiles{ it.isDirectory() && !it.name.startsWith('.') }
+            def distDir = new File(project.projectDir, 'dist')
+            def scriptDirs = distDir.listFiles({ File f -> f.isDirectory() && !f.name.startsWith('.') } as FileFilter)
             if (scriptDirs && scriptDirs.length > 0) {
                 return scriptDirs[0].name
             }
-            throw new GradleException('No script folder found in dist/')
+            throw new GradleException('在dist/目录中未找到脚本文件夹')
         }
         
         def checkADB = {
@@ -213,8 +216,8 @@ task fetchError(type: Exec) {
         def sourcePath = "/storage/emulated/0/Android/data/com.tencent.mobileqq/QStory/Plugin/${scriptName}/error.txt"
         def targetFile = new File(project.projectDir, 'error.txt')
         
-        println "\n📥 Fetching error.txt from: ${scriptName}"
-        println "Source: ${sourcePath}"
+        println "\n📥 正在获取error.txt从: ${scriptName}"
+        println "源路径: ${sourcePath}"
         
         def pullExec = project.exec {
             commandLine 'adb', 'pull', sourcePath, targetFile.absolutePath
@@ -224,19 +227,19 @@ task fetchError(type: Exec) {
         }
         
         if (pullExec.exitValue == 0) {
-            println "✅ Error file fetched successfully!"
-            println "📂 Saved to: ${targetFile.absolutePath}"
+            println "✅ 错误文件获取成功!"
+            println "📂 保存到: ${targetFile.absolutePath}"
             
             if (targetFile.exists() && targetFile.length() > 0) {
-                println "\n📄 Error file content:"
+                println "\n📄 错误文件内容:"
                 println "=" * 60
                 println targetFile.text
                 println "=" * 60
             } else {
-                println "\n✓ No errors found (file is empty)"
+                println "\n✓ 未发现错误(文件为空)"
             }
         } else {
-            println "\n⚠️  Error file not found on device (script may not have errors)"
+            println "\n⚠️  设备上未找到错误文件(脚本可能没有错误)"
         }
     }
     
