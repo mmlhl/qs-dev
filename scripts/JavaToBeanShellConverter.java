@@ -343,6 +343,15 @@ public class JavaToBeanShellConverter {
                 });
             } else {
                 // 处理非@ScriptMethods类(如常量类)
+                // 检查是否有 @GlobalInstance 注解
+                boolean isGlobalInstance = classDecl.getAnnotations().stream()
+                        .anyMatch(anno -> anno.getNameAsString().equals("GlobalInstance"));
+                
+                // 如果有 @GlobalInstance 注解，跳过类定义（已在 main.java 中生成）
+                if (isGlobalInstance) {
+                    return;
+                }
+                
                 // 根据路径重命名类,避免不同路径相同类名冲突
                 String originalClassName = classDecl.getNameAsString();
                 
@@ -593,26 +602,24 @@ public class JavaToBeanShellConverter {
                                         // Generate class definition with static fields
                                         StringBuilder classCode = new StringBuilder();
                                         
-                                        // Only generate class definition for @ScriptMethods classes
-                                        // Constant classes are already defined in their own files
-                                        if (hasScriptMethods) {
-                                            classCode.append("class ").append(className).append(" {\n");
-                                            
-                                            // Add static fields (without 'static' keyword in BeanShell)
-                                            classDecl.getFields().forEach(field -> {
-                                                if (field.isStatic() && field.isPublic()) {
-                                                    field.getVariables().forEach(var -> {
-                                                        String fieldName = var.getNameAsString();
-                                                        var.getInitializer().ifPresent(init -> {
-                                                            classCode.append("    ").append(fieldName).append(" = ");
-                                                            classCode.append(printer.print(init)).append(";\n");
-                                                        });
+                                        // Always generate class definition for @GlobalInstance classes
+                                        // (both @ScriptMethods and constant classes)
+                                        classCode.append("class ").append(actualClassName).append(" {\n");
+                                        
+                                        // Add static fields (without 'static' keyword in BeanShell)
+                                        classDecl.getFields().forEach(field -> {
+                                            if (field.isStatic() && field.isPublic()) {
+                                                field.getVariables().forEach(var -> {
+                                                    String fieldName = var.getNameAsString();
+                                                    var.getInitializer().ifPresent(init -> {
+                                                        classCode.append("    ").append(fieldName).append(" = ");
+                                                        classCode.append(printer.print(init)).append(";\n");
                                                     });
-                                                }
-                                            });
-                                            
-                                            classCode.append("}\n");
-                                        }
+                                                });
+                                            }
+                                        });
+                                        
+                                        classCode.append("}\n");
                                         
                                         // Generate instance statement: VarName = new ActualClassName();
                                         String instanceStmt = classCode.toString() + varName + " = new " + actualClassName + "();";
