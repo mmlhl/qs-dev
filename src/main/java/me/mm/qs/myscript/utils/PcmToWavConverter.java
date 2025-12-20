@@ -1,7 +1,6 @@
 package me.mm.qs.myscript.utils;
 
 import me.mm.qs.script.QScriptBase;
-import me.mm.qs.script.annotation.ScriptMethods;
 
 import java.io.FileInputStream;
 import java.io.FileOutputStream;
@@ -10,7 +9,6 @@ import java.io.FileOutputStream;
  * PCM 转 WAV 格式转换工具
  * 为解码后的 PCM 文件添加 WAV 文件头，使其可以被标准音频播放器播放
  */
-@ScriptMethods
 public class PcmToWavConverter extends QScriptBase {
 
     /**

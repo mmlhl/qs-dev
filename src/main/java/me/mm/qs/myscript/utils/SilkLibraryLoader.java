@@ -1,7 +1,6 @@
 package me.mm.qs.myscript.utils;
 
 import me.mm.qs.script.QScriptBase;
-import me.mm.qs.script.annotation.ScriptMethods;
 
 import java.lang.reflect.Method;
 
@@ -12,7 +11,6 @@ import static me.mm.qs.script.Globals.loader;
  * Silk 库加载工具类
  * 主动加载 Silk 编解码库
  */
-@ScriptMethods
 public class SilkLibraryLoader extends QScriptBase {
 
     /**

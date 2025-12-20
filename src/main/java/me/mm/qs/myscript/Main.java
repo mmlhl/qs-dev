@@ -3,7 +3,6 @@ package me.mm.qs.myscript;
 import me.mm.qs.myscript.constants.MessageType;
 import me.mm.qs.script.QScriptBase;
 import me.mm.qs.script.annotation.RootCode;
-import me.mm.qs.script.annotation.ScriptMethods;
 import me.mm.qs.script.annotation.ScriptInfo;
 import me.mm.qs.script.types.MessageData;
 import me.mm.qs.myscript.utils.MessageHandler;
@@ -24,13 +23,9 @@ import static me.mm.qs.script.Globals.*;
     name = "语音转换",
     author = "木木",
     version = "1.0",
-    description =
-            """
-            将别人发的QQ语音保存为可以直接听的文件
-            """ ,
+    description ="111",
     tags = "群聊辅助,娱乐功能"
 )
-@ScriptMethods
 public class Main extends QScriptBase {
     // Utility instances - will be removed in BeanShell output
     private final MessageHandler messageHandler = new MessageHandler();

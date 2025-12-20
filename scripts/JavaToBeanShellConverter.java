@@ -73,6 +73,7 @@ public class JavaToBeanShellConverter {
         BEANSHELL_TYPES.add("Method");
         BEANSHELL_TYPES.add("Field");
         BEANSHELL_TYPES.add("Constructor");
+        BEANSHELL_TYPES.add("Class");
     }
 
     public static void main(String[] args) throws IOException {
@@ -95,6 +96,9 @@ public class JavaToBeanShellConverter {
         classNameMap.clear();
         // 清空全局实例映射表
         globalInstanceMap.clear();
+        
+        // 预先扫描整个 myscript 目录，收集所有类的映射关系
+        collectAllClassNameMappings(scriptPath);
         
         // Find project root
         Path projectRoot = scriptPath;
@@ -193,27 +197,10 @@ public class JavaToBeanShellConverter {
             });
         }
         
-        // Convert method calls: messageHandler.xxx() -> xxx(), helper.xxx() -> xxx()
+        // Convert method calls: ClassName.staticMethod() -> renamedClassName.staticMethod()
         // Also convert Globals.xxx -> xxx
-        // Also convert audioDecoder.xxx() -> xxx(), wavConverter.xxx() -> xxx()
         if (converted.getBody().isPresent()) {
-            converted.getBody().get().findAll(MethodCallExpr.class).forEach(methodCall -> {
-                if (methodCall.getScope().isPresent()) {
-                    var scope = methodCall.getScope().get();
-                    // Check if it's an instance method call from utility classes
-                    if (scope.isNameExpr()) {
-                        String scopeName = scope.asNameExpr().getNameAsString();
-                        // 移除工具类实例的方法调用前缀
-                        if (scopeName.equals("messageHandler") || 
-                            scopeName.equals("helper") ||
-                            scopeName.equals("audioDecoder") ||
-                            scopeName.equals("wavConverter")) {
-                            // Remove the scope, making it a direct function call
-                            methodCall.removeScope();
-                        }
-                    }
-                }
-            });
+            // 不再移除实例方法调用的前缀，因为类已保留定义
             
             // Convert Globals.xxx to xxx (global variables)
             // Convert ClassName.staticField to globalVarName.staticField for @GlobalInstance classes
@@ -337,10 +324,8 @@ public class JavaToBeanShellConverter {
             beanShellCode.append("\n");
         }
 
-        // Process all classes annotated with @ScriptMethods or @RootCode
+        // Process all classes in myscript
         cu.findAll(ClassOrInterfaceDeclaration.class).forEach(classDecl -> {
-            boolean hasScriptMethodsAnnotation = classDecl.getAnnotations().stream()
-                    .anyMatch(anno -> anno.getNameAsString().equals("ScriptMethods"));
             boolean hasGlobalInstanceAnnotation = classDecl.getAnnotations().stream()
                     .anyMatch(anno -> anno.getNameAsString().equals("GlobalInstance"));
             boolean hasRootCodeAnnotation = classDecl.getAnnotations().stream()
@@ -360,24 +345,41 @@ public class JavaToBeanShellConverter {
                 return; // Skip further processing for @RootCode classes
             }
 
-            if (hasScriptMethodsAnnotation) {
-                // Skip @GlobalInstance classes - they are already generated as global variables
-                if (hasGlobalInstanceAnnotation) {
-                    return;
+            // Skip @GlobalInstance classes - they are already generated as global variables
+            if (hasGlobalInstanceAnnotation) {
+                return;
+            }
+            
+            String originalClassName = classDecl.getNameAsString();
+            boolean isMainClass = originalClassName.equals("Main") && isMainFile;
+            
+            if (isMainClass) {
+                // Main 类：去掉大括号，保留所有内容（变量和方法）到根级别
+                
+                // 提取成员变量
+                classDecl.getFields().forEach(field -> {
+                    field.getVariables().forEach(var -> {
+                        String varName = var.getNameAsString();
+                        if (var.getInitializer().isPresent()) {
+                            beanShellCode.append(varName).append(" = ");
+                            beanShellCode.append(printer.print(var.getInitializer().get())).append(";\n");
+                        } else {
+                            beanShellCode.append(varName).append(";\n");
+                        }
+                    });
+                });
+                
+                if (!classDecl.getFields().isEmpty()) {
+                    beanShellCode.append("\n");
                 }
                 
-                // For regular @ScriptMethods classes: Extract methods only
-                // Skip utility instance fields (messageHandler, helper, etc.)
-                // These are only for IDE support and not needed in BeanShell
-                
-                // Extract all methods from this class
+                // 提取方法
                 classDecl.getMethods().forEach(method -> {
-                    // Check if this method has @RootCode annotation
                     boolean hasRootCode = method.getAnnotations().stream()
                             .anyMatch(anno -> anno.getNameAsString().equals("RootCode"));
                     
                     if (hasRootCode) {
-                        // Extract only the method body statements
+                        // 只提取方法体内容
                         if (method.getBody().isPresent()) {
                             method.getBody().get().getStatements().forEach(stmt -> {
                                 beanShellCode.append(printer.print(stmt)).append("\n");
@@ -385,62 +387,71 @@ public class JavaToBeanShellConverter {
                             beanShellCode.append("\n");
                         }
                     } else {
-                        // Extract the full method
+                        // 提取完整方法
                         String methodCode = convertMethod(method, printer);
                         beanShellCode.append(methodCode).append("\n\n");
                     }
                 });
             } else {
-                // 处理非@ScriptMethods类(如常量类)
-                // 检查是否有 @GlobalInstance 注解
-                boolean isGlobalInstance = classDecl.getAnnotations().stream()
-                        .anyMatch(anno -> anno.getNameAsString().equals("GlobalInstance"));
-                
-                // 如果有 @GlobalInstance 注解，跳过类定义（已在 main.java 中生成）
-                if (isGlobalInstance) {
-                    return;
-                }
-                
-                // 根据路径重命名类,避免不同路径相同类名冲突
-                String originalClassName = classDecl.getNameAsString();
-                
-                // 获取文件相对于scriptRoot的路径,用于生成唯一类名
-                // 例如: constants/MessageType -> Constants_MessageType
-                //       enums/MessageType -> Enums_MessageType
+                // 其他类：保留类定义并重命名为 路径_类名
                 String relativePath = scriptRoot.relativize(javaFile.getParent()).toString();
                 String uniqueClassName;
                 if (relativePath.isEmpty() || relativePath.equals(".")) {
-                    // 如果在根目录,直接使用原类名
                     uniqueClassName = originalClassName;
                 } else {
-                    // 将路径转换为类名前缀: constants/sub -> Constants_Sub_
                     String pathPrefix = relativePath.replace(File.separatorChar, '_')
-                        .replace('-', '_')
-                        .substring(0, 1).toUpperCase() + 
-                        relativePath.replace(File.separatorChar, '_').replace('-', '_').substring(1);
+                        .replace('-', '_');
+                    pathPrefix = pathPrefix.substring(0, 1).toUpperCase() + pathPrefix.substring(1);
                     uniqueClassName = pathPrefix + "_" + originalClassName;
                 }
                 
-                // 记录类名映射
+                // 记录类名映射（用于转换 new 语句）
                 classNameMap.put(originalClassName, uniqueClassName);
                 
-                // 定义类,不自动实例化
+                // 添加类注释
+                if (classDecl.getJavadocComment().isPresent()) {
+                    beanShellCode.append("/**").append(classDecl.getJavadocComment().get().getContent()).append("*/\n");
+                }
+                
+                // 输出类定义
                 beanShellCode.append("class ").append(uniqueClassName).append(" {\n");
                 
-                // 添加所有常量字段
+                // 添加所有字段（静态和非静态）
                 classDecl.getFields().forEach(field -> {
-                    if (field.isStatic() && field.isFinal() && field.isPublic()) {
-                        field.getVariables().forEach(var -> {
-                            String varName = var.getNameAsString();
-                            var.getInitializer().ifPresent(init -> {
-                                beanShellCode.append("    ").append(varName).append(" = ");
-                                beanShellCode.append(printer.print(init)).append(";\n");
-                            });
-                        });
+                    field.getVariables().forEach(var -> {
+                        String varName = var.getNameAsString();
+                        if (var.getInitializer().isPresent()) {
+                            beanShellCode.append("    ").append(varName).append(" = ");
+                            beanShellCode.append(printer.print(var.getInitializer().get())).append(";\n");
+                        } else {
+                            beanShellCode.append("    ").append(varName).append(";\n");
+                        }
+                    });
+                });
+                
+                if (!classDecl.getFields().isEmpty()) {
+                    beanShellCode.append("\n");
+                }
+                
+                // 添加方法
+                classDecl.getMethods().forEach(method -> {
+                    boolean hasRootCode = method.getAnnotations().stream()
+                            .anyMatch(anno -> anno.getNameAsString().equals("RootCode"));
+                    
+                    if (!hasRootCode) {
+                        String methodCode = convertMethod(method, printer);
+                        // 缩进方法代码
+                        String[] lines = methodCode.split("\n");
+                        for (String line : lines) {
+                            if (!line.trim().isEmpty()) {
+                                beanShellCode.append("    ").append(line).append("\n");
+                            }
+                        }
+                        beanShellCode.append("\n");
                     }
                 });
                 
-                beanShellCode.append("}\n");
+                beanShellCode.append("}\n\n");
             }
         });
 
@@ -899,53 +910,78 @@ public class JavaToBeanShellConverter {
     }
 
     /**
-     * 收集导入文件中的类名映射
+     * 收集导入文件中的类名映射（已由 collectAllClassNameMappings 替代）
      */
     private static void collectClassNameMappings(CompilationUnit cu, Path scriptRoot) {
-        cu.getImports().forEach(importDecl -> {
-            String importName = importDecl.getNameAsString();
-            // 只处理 myscript 包的非静态导入
-            if (!importDecl.isStatic() && importName.startsWith("me.mm.qs.myscript.")) {
-                String relativePath = importName.substring("me.mm.qs.myscript.".length());
-                String[] parts = relativePath.split("\\.");
-                
-                if (parts.length >= 2) {
-                    // 例如: constants.MyMessageType -> parts = ["constants", "MyMessageType"]
-                    String className = parts[parts.length - 1];
-                    String pathPrefix = String.join("/", java.util.Arrays.copyOf(parts, parts.length - 1));
-                    
-                    // 检查这个文件是否存在
-                    Path classFile = scriptRoot.resolve(pathPrefix).resolve(className + ".java");
-                    if (Files.exists(classFile)) {
-                        try {
-                            // 解析文件，检查是否是常量类（没有@ScriptMethods注解）
-                            FileInputStream in = new FileInputStream(classFile.toFile());
-                            ParseResult<CompilationUnit> parseResult = new JavaParser(new ParserConfiguration()).parse(in);
-                            in.close();
-                            
-                            if (parseResult.isSuccessful()) {
-                                CompilationUnit classCu = parseResult.getResult().get();
-                                classCu.findAll(ClassOrInterfaceDeclaration.class).forEach(classDecl -> {
-                                    boolean hasScriptMethods = classDecl.getAnnotations().stream()
-                                        .anyMatch(anno -> anno.getNameAsString().equals("ScriptMethods"));
+        // 已由 collectAllClassNameMappings 在启动时预先收集，此处无需操作
+    }
+    
+    /**
+     * 扫描整个 myscript 目录，收集所有需要重命名的类
+     * 包括普通类和 @GlobalInstance 类
+     * 跳过 Main 类
+     */
+    private static void collectAllClassNameMappings(Path scriptRoot) {
+        try {
+            Files.walk(scriptRoot)
+                .filter(path -> path.toString().endsWith(".java"))
+                .forEach(javaFile -> {
+                    try {
+                        FileInputStream in = new FileInputStream(javaFile.toFile());
+                        ParseResult<CompilationUnit> parseResult = new JavaParser(new ParserConfiguration()).parse(in);
+                        in.close();
+                        
+                        if (parseResult.isSuccessful()) {
+                            CompilationUnit cu = parseResult.getResult().get();
+                            cu.findAll(ClassOrInterfaceDeclaration.class).forEach(classDecl -> {
+                                String className = classDecl.getNameAsString();
+                                
+                                // 跳过 Main 类
+                                if (className.equals("Main")) {
+                                    return;
+                                }
+                                
+                                boolean hasGlobalInstance = classDecl.getAnnotations().stream()
+                                    .anyMatch(anno -> anno.getNameAsString().equals("GlobalInstance"));
+                                
+                                // 获取文件相对于 scriptRoot 的路径
+                                String relativePath = scriptRoot.relativize(javaFile.getParent()).toString();
+                                
+                                // 处理 @GlobalInstance 类 - 添加到 globalInstanceMap
+                                if (hasGlobalInstance) {
+                                    String actualClassName = className;
+                                    String varName = className;
                                     
-                                    if (!hasScriptMethods) {
-                                        // 这是一个常量类，需要映射
-                                        String uniqueClassName = pathPrefix.replace('/', '_')
-                                            .substring(0, 1).toUpperCase() + 
-                                            pathPrefix.replace('/', '_').substring(1) + 
-                                            "_" + className;
-                                        classNameMap.put(className, uniqueClassName);
+                                    // 如果在子目录中，需要重命名
+                                    if (!relativePath.isEmpty() && !relativePath.equals(".")) {
+                                        String pathPrefix = relativePath.replace(File.separatorChar, '_')
+                                            .replace('-', '_');
+                                        pathPrefix = pathPrefix.substring(0, 1).toUpperCase() + pathPrefix.substring(1);
+                                        actualClassName = pathPrefix + "_" + className;
+                                        varName = actualClassName;
                                     }
-                                });
-                            }
-                        } catch (IOException e) {
-                            // 忽略错误
+                                    
+                                    globalInstanceMap.put(className, varName);
+                                    return;
+                                }
+                                
+                                // 处理普通类 - 只有在子目录中的类才需要重命名
+                                if (!relativePath.isEmpty() && !relativePath.equals(".")) {
+                                    String pathPrefix = relativePath.replace(File.separatorChar, '_')
+                                        .replace('-', '_');
+                                    pathPrefix = pathPrefix.substring(0, 1).toUpperCase() + pathPrefix.substring(1);
+                                    String uniqueClassName = pathPrefix + "_" + className;
+                                    classNameMap.put(className, uniqueClassName);
+                                }
+                            });
                         }
+                    } catch (IOException e) {
+                        // 忽略错误
                     }
-                }
-            }
-        });
+                });
+        } catch (IOException e) {
+            System.err.println("Error scanning for class name mappings: " + e.getMessage());
+        }
     }
     
     /**
@@ -956,7 +992,13 @@ public class JavaToBeanShellConverter {
      */
     private static String replaceClassNameReferences(String code) {
         String result = code;
-        for (Map.Entry<String, String> entry : classNameMap.entrySet()) {
+        
+        // 合并 classNameMap 和 globalInstanceMap 进行替换
+        Map<String, String> allMappings = new HashMap<>();
+        allMappings.putAll(classNameMap);
+        allMappings.putAll(globalInstanceMap);
+        
+        for (Map.Entry<String, String> entry : allMappings.entrySet()) {
             String originalName = entry.getKey();
             String mappedName = entry.getValue();
             
@@ -966,14 +1008,21 @@ public class JavaToBeanShellConverter {
                 "new " + mappedName + "("
             );
             
-            // 2. 替换变量声明: ClassName varName = 为 varName =
+            // 2. 替换静态字段访问: ClassName.fieldName -> MappedName.fieldName
+            // 使用负向预查确保不匹配字符串中的路径（如 "/utils/ClassName.java"）
+            result = result.replaceAll(
+                "(?<![/\"'])\\b" + originalName + "\\.",
+                mappedName + "."
+            );
+            
+            // 3. 替换变量声明: ClassName varName = 为 varName =
             // 匹配: ClassName varName =
             result = result.replaceAll(
                 "\\b" + originalName + "\\s+([a-zA-Z_][a-zA-Z0-9_]*)\\s*=",
                 "$1 ="
             );
             
-            // 3. 替换泛型中的类名: ArrayList<ClassName> -> ArrayList
+            // 4. 替换泛型中的类名: ArrayList<ClassName> -> ArrayList
             // 然后在下面统一移除泛型声明
             result = result.replaceAll(
                 "<\\s*" + originalName + "\\s*>",
@@ -981,8 +1030,8 @@ public class JavaToBeanShellConverter {
             );
         }
         
-        // 4. 额外处理：移除所有含有映射类名的泛型声明
-        for (String mappedName : classNameMap.values()) {
+        // 5. 额外处理：移除所有含有映射类名的泛型声明
+        for (String mappedName : allMappings.values()) {
             result = result.replaceAll(
                 "<\\s*" + mappedName + "\\s*>",
                 ""

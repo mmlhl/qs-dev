@@ -1,7 +1,6 @@
 package me.mm.qs.myscript.utils;
 
 import me.mm.qs.script.QScriptBase;
-import me.mm.qs.script.annotation.ScriptMethods;
 import me.mm.qs.script.types.MessageData;
 import me.mm.qs.myscript.constants.MessageType;
 
@@ -11,7 +10,6 @@ import static me.mm.qs.script.Globals.*;
  * Message handling utilities.
  * Methods in this class will be extracted to the module file.
  */
-@ScriptMethods
 public class MessageHandler extends QScriptBase {
 
     /**

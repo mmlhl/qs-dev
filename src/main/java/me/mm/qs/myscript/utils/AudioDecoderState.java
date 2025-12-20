@@ -1,14 +1,12 @@
 package me.mm.qs.myscript.utils;
 
 import me.mm.qs.script.QScriptBase;
-import me.mm.qs.script.annotation.ScriptMethods;
 import me.mm.qs.script.annotation.GlobalInstance;
 
 /**
  * 音频解码器状态数据类
  * 用于存储解码过程中的共享状态数据
  */
-@ScriptMethods
 @GlobalInstance
 public class AudioDecoderState extends QScriptBase {
     

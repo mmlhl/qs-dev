@@ -1,7 +1,8 @@
 package me.mm.qs.myscript.utils;
 
 import me.mm.qs.script.QScriptBase;
-import me.mm.qs.script.annotation.ScriptMethods;
+import me.mm.qs.myscript.utils.SilkLibraryLoader;
+import me.mm.qs.myscript.utils.AudioDecoderState;
 
 import java.io.File;
 import java.io.FileInputStream;
@@ -14,7 +15,6 @@ import static me.mm.qs.script.Globals.*;
  * Silk 音频解码工具类
  * 改回用 InputStream，看看崩溃会不会提前
  */
-@ScriptMethods
 public class SilkAudioDecoder extends QScriptBase {
 
 
@@ -38,8 +38,8 @@ public class SilkAudioDecoder extends QScriptBase {
             Method checkLoadedMethod = silkWrapperClass.getMethod("e");
             Boolean isLoaded = (Boolean) checkLoadedMethod.invoke(null);
             if (!isLoaded.booleanValue()) {
-                toast("Silk库未加载");
-                return null;
+                SilkLibraryLoader silkLoader = new SilkLibraryLoader();
+                silkLoader.loadSilkLibrary();
             }
 
             fis = new FileInputStream(inputFile);
