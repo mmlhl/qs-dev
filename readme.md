@@ -122,13 +122,13 @@ class Init extends QScriptBase {
 | 注解 | 说明 |
 |------|------|
 | `@ScriptInfo` | 脚本元信息（名称、作者、版本等） |
-| `@RootCode` | 方法体直接放到根级别（用于初始化代码） |
+| `@RootCode` | 去掉类和方法包装，直接把代码放到脚本根级别执行 |
 | `@GlobalInstance` | 全局实例，在 main.java 中自动初始化 |
 
 ## 转换规则
 
 1. **Main 类**: 去掉大括号，保留所有内容（变量+方法）到根级别
-2. **@RootCode 类/方法**: 只保留方法体内容
+2. **@RootCode 类/方法**: 仅保留方法体内容，指直接放到脚本根级别
 3. **@GlobalInstance 类**: 在 main.java 中生成全局实例
 4. **其他类**: 保留类定义，重命名为 `路径_类名`
 5. **import**: 转换为 `load(appPath + "/path/File.java")`
