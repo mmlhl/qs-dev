@@ -802,12 +802,12 @@ public class JavaToBeanShellConverter {
         String tags = getAnnotationValue(scriptInfo, "tags", "功能扩展");
         String idFromAnnotation = getAnnotationValue(scriptInfo, "id", "");
         
-        // Generate or load script ID from dist root (not in script folder)
-        Path scriptIdFile = distRoot.resolve(".script-id");
+        // Generate or load script ID from source script folder (each script has its own ID)
+        Path scriptIdFile = scriptRoot.resolve(".script-id");
         String scriptId;
         
         if (Files.exists(scriptIdFile)) {
-            // Load existing ID
+            // Load existing ID from source directory
             scriptId = Files.readString(scriptIdFile).trim();
             System.out.println("Using existing script ID: " + scriptId);
         } else {
@@ -817,6 +817,7 @@ public class JavaToBeanShellConverter {
             } else {
                 scriptId = generateScriptId(name, author);
             }
+            // Save to source directory so it persists across builds
             Files.writeString(scriptIdFile, scriptId);
             System.out.println("Generated new script ID: " + scriptId);
         }

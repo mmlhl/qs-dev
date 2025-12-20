@@ -362,7 +362,29 @@ task createScript {
         copy {
             from templateDir
             into newScriptDir
+            // 排除模板的 .script-id 文件
+            exclude '.script-id'
         }
+        
+        // 生成独立的脚本 ID (32位随机hex字符串)
+        def generateScriptId = {
+            def seed = scriptName + "|" + displayName + "|" + System.currentTimeMillis() + "|" + UUID.randomUUID().toString()
+            def md = java.security.MessageDigest.getInstance("MD5")
+            def hash = md.digest(seed.getBytes("UTF-8"))
+            def hexString = new StringBuilder()
+            hash.each { b ->
+                def hex = Integer.toHexString(0xff & b)
+                if (hex.length() == 1) {
+                    hexString.append('0')
+                }
+                hexString.append(hex)
+            }
+            return hexString.toString()
+        }
+        
+        def scriptId = generateScriptId()
+        def scriptIdFile = new File(newScriptDir, '.script-id')
+        scriptIdFile.text = scriptId
         
         // 更新包名和脚本信息
         def mainFile = new File(newScriptDir, 'Main.java')
@@ -376,6 +398,7 @@ task createScript {
         
         println "\n✨ 脚本创建成功!"
         println "📂 位置: ${newScriptDir.absolutePath}"
+        println "🆔 脚本ID: ${scriptId}"
         println "\n下一步:"
         println "  1. 编辑 Main.java 实现你的功能"
         println "  2. gradlew deployScript -PscriptName=${scriptName}"
