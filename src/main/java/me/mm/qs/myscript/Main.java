@@ -8,6 +8,8 @@ import me.mm.qs.script.annotation.ScriptInfo;
 import me.mm.qs.script.types.MessageData;
 import me.mm.qs.myscript.utils.MessageHandler;
 import me.mm.qs.myscript.utils.Helper;
+import me.mm.qs.myscript.utils.SilkAudioDecoder;
+import me.mm.qs.myscript.utils.PcmToWavConverter;
 
 import static me.mm.qs.script.Globals.*;
 
@@ -33,6 +35,8 @@ public class Main extends QScriptBase {
     // Utility instances - will be removed in BeanShell output
     private final MessageHandler messageHandler = new MessageHandler();
     private final Helper helper = new Helper();
+    private final SilkAudioDecoder audioDecoder = new SilkAudioDecoder();
+    private final PcmToWavConverter wavConverter = new PcmToWavConverter();
 
     // Callback methods - will be extracted to root level in BeanShell
     @Override
@@ -68,6 +72,8 @@ public class Main extends QScriptBase {
             replyEmoji(msg, "1");
         }
         
+        // 注释掉测试代码，避免BeanShell命名空间问题
+        /*
         // 测试新增的工具方法
         if (messageHandler.containsKeyword(text, "测试")) {
             toast("检测到关键词:测试");
@@ -85,16 +91,19 @@ public class Main extends QScriptBase {
                 }
             }
         }
+        */
     }
 
     @Override
     public void onCreateMenu(MessageData msg) {
+        MessageType type = new MessageType();
         if (msg.IsGroup) {
             addMenuItem("仅群", "showGroup");
-            addMenuItem("保存", "saveVoice");
-
         }
-
+        // 为语音消息添加解码菜单
+        if (msg.MessageType == type.VOICE) {
+            addMenuItem("解码为PCM", "saveVoice");
+        }
     }
 
     // Custom menu callback
@@ -102,15 +111,16 @@ public class Main extends QScriptBase {
         toast("提示在" + msg.MessageType);
     }
 
-    // Custom menu callback
+    // Custom menu callback - 解码语音为PCM
     public void saveVoice(MessageData msg) {
-        MessageType type =new MessageType();
-        toast(""+type.VOICE);
-
+        MessageType type = new MessageType();
         if (msg.MessageType == type.VOICE) {
-            toast(msg.LocalPath);
+            String pcmPath = audioDecoder.decodeVoiceMessage(msg.LocalPath);
+        } else {
+            toast("这不是语音消息");
         }
     }
+
 
     // Floating window menu callback - parameters: groupUin, uin, chatType
     public void 加载提示(String groupUin, String uin, int chatType) {

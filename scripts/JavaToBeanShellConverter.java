@@ -64,6 +64,11 @@ public class JavaToBeanShellConverter {
         BEANSHELL_TYPES.add("GroupMemberInfo");
         BEANSHELL_TYPES.add("ForbiddenInfo");
         BEANSHELL_TYPES.add("FriendInfo");
+        
+        // Java reflection types - BeanShell doesn't support these type declarations
+        BEANSHELL_TYPES.add("Method");
+        BEANSHELL_TYPES.add("Field");
+        BEANSHELL_TYPES.add("Constructor");
     }
 
     public static void main(String[] args) throws IOException {
@@ -151,16 +156,28 @@ public class JavaToBeanShellConverter {
             convertTypeToObject(param.getType());
         }
         
+        // Convert local variable types in method body
+        if (converted.getBody().isPresent()) {
+            converted.getBody().get().findAll(com.github.javaparser.ast.expr.VariableDeclarationExpr.class).forEach(varDecl -> {
+                convertTypeToObject(varDecl.getCommonType());
+            });
+        }
+        
         // Convert method calls: messageHandler.xxx() -> xxx(), helper.xxx() -> xxx()
         // Also convert Globals.xxx -> xxx
+        // Also convert audioDecoder.xxx() -> xxx(), wavConverter.xxx() -> xxx()
         if (converted.getBody().isPresent()) {
             converted.getBody().get().findAll(MethodCallExpr.class).forEach(methodCall -> {
                 if (methodCall.getScope().isPresent()) {
                     var scope = methodCall.getScope().get();
-                    // Check if it's messageHandler.xxx() or helper.xxx()
+                    // Check if it's an instance method call from utility classes
                     if (scope.isNameExpr()) {
                         String scopeName = scope.asNameExpr().getNameAsString();
-                        if (scopeName.equals("messageHandler") || scopeName.equals("helper")) {
+                        // 移除工具类实例的方法调用前缀
+                        if (scopeName.equals("messageHandler") || 
+                            scopeName.equals("helper") ||
+                            scopeName.equals("audioDecoder") ||
+                            scopeName.equals("wavConverter")) {
                             // Remove the scope, making it a direct function call
                             methodCall.removeScope();
                         }
