@@ -1,15 +1,15 @@
-package me.mm.qs.myscript;
+package me.mm.qs.scripts.voice_converter;
 
-import me.mm.qs.myscript.constants.MessageType;
+import me.mm.qs.scripts.voice_converter.constants.MessageType;
 import me.mm.qs.script.QScriptBase;
 import me.mm.qs.script.annotation.RootCode;
 import me.mm.qs.script.annotation.ScriptInfo;
 import me.mm.qs.script.types.MessageData;
-import me.mm.qs.myscript.utils.MessageHandler;
-import me.mm.qs.myscript.utils.Helper;
-import me.mm.qs.myscript.utils.SilkAudioDecoder;
-import me.mm.qs.myscript.utils.PcmToWavConverter;
-import me.mm.qs.myscript.utils.AudioDecoderState;
+import me.mm.qs.scripts.voice_converter.utils.MessageHandler;
+import me.mm.qs.scripts.voice_converter.utils.Helper;
+import me.mm.qs.scripts.voice_converter.utils.SilkAudioDecoder;
+import me.mm.qs.scripts.voice_converter.utils.PcmToWavConverter;
+import me.mm.qs.scripts.voice_converter.utils.AudioDecoderState;
 
 import java.io.File;
 

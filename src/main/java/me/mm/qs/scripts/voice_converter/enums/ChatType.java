@@ -1,4 +1,4 @@
-package me.mm.qs.myscript.enums;
+package me.mm.qs.scripts.voice_converter.enums;
 
 /**
  * 聊天类型枚举常量

@@ -1,7 +1,7 @@
-package me.mm.qs.myscript.utils;
+package me.mm.qs.scripts.voice_converter.utils;
 
 import me.mm.qs.script.QScriptBase;
-import me.mm.qs.myscript.enums.ChatType;
+import me.mm.qs.scripts.voice_converter.enums.ChatType;
 
 /**
  * General helper utilities.

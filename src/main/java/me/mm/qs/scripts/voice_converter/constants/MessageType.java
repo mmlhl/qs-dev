@@ -1,4 +1,4 @@
-package me.mm.qs.myscript.constants;
+package me.mm.qs.scripts.voice_converter.constants;
 
 import me.mm.qs.script.annotation.GlobalInstance;
 

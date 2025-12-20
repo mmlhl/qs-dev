@@ -138,6 +138,15 @@ public class JavaToBeanShellConverter {
             
             // Generate script metadata files (desc.txt and info.prop) in scriptName folder
             generateScriptMetadata(mainFile, scriptDir, distRoot, scriptPath, scriptName);
+            
+            // Write source dir -> display name mapping for gradle deploy
+            String sourceDirName = scriptPath.getFileName().toString();
+            Path mappingFile = distRoot.resolve(".script-mapping");
+            // Append to mapping file
+            String mappingLine = sourceDirName + "=" + scriptName + "\n";
+            java.nio.file.Files.writeString(mappingFile, mappingLine, 
+                java.nio.file.StandardOpenOption.CREATE, 
+                java.nio.file.StandardOpenOption.APPEND);
         } else {
             System.err.println("Warning: Main.java not found in " + scriptPackageDir);
         }

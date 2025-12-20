@@ -1,8 +1,8 @@
-package me.mm.qs.myscript.utils;
+package me.mm.qs.scripts.voice_converter.utils;
 
 import me.mm.qs.script.QScriptBase;
 import me.mm.qs.script.types.MessageData;
-import me.mm.qs.myscript.constants.MessageType;
+import me.mm.qs.scripts.voice_converter.constants.MessageType;
 
 import static me.mm.qs.script.Globals.*;
 

@@ -18,18 +18,10 @@ sourceSets {
     }
 }
 
-// 配置Java编译器允许非静态访问工具方法
+// 配置Java编译器
 compileJava {
     options.encoding = 'UTF-8'
     options.compilerArgs += ['-Xlint:none']
-    // 将工具类添加到编译类路径,使Main.java可以引用它们
-    doFirst {
-        // 确保工具类首先被编译
-        def utilsFiles = fileTree(dir: 'src/main/java/me/mm/qs/myscript/utils', include: '*.java')
-        if (utilsFiles.files) {
-            println "工具类将优先编译"
-        }
-    }
 }
 
 repositories {
@@ -51,13 +43,46 @@ application {
     mainClass = 'JavaToBeanShellConverter'
 }
 
-// 将MyScript.java转换为BeanShell的任务
+// ========================================
+// 脚本转换任务
+// ========================================
+// 用法: 
+//   gradlew convertScript -PscriptName=voice_converter  (转换指定脚本)
+//   gradlew convertScript                                (转换所有脚本)
+// ========================================
 task convertScript(type: JavaExec) {
-    group = 'build'
-    description = '将myscript包转换为BeanShell格式(输出到dist/)'
+    group = 'script'
+    description = '将scripts包中的脚本转换为BeanShell格式(输出到dist/)'
     classpath = sourceSets.main.runtimeClasspath
     mainClass = 'JavaToBeanShellConverter'
-    args 'src/main/java/me/mm/qs/myscript'
+    
+    doFirst {
+        // 清空旧的映射文件
+        def mappingFile = file('dist/.script-mapping')
+        if (mappingFile.exists()) {
+            mappingFile.delete()
+        }
+        
+        def scriptName = project.findProperty('scriptName')
+        def scriptsDir = file('src/main/java/me/mm/qs/scripts')
+        
+        if (scriptName) {
+            // 转换指定脚本
+            def scriptDir = new File(scriptsDir, scriptName)
+            if (!scriptDir.exists()) {
+                throw new GradleException("脚本不存在: ${scriptName}\n可用脚本: ${scriptsDir.listFiles()?.findAll{it.isDirectory()}*.name?.join(', ')}")
+            }
+            args scriptDir.absolutePath
+            println "\n📦 转换脚本: ${scriptName}"
+        } else {
+            // 转换所有脚本
+            println "\n📦 转换所有脚本..."
+            scriptsDir.listFiles()?.findAll { it.isDirectory() }?.each { dir ->
+                println "  - ${dir.name}"
+            }
+            args scriptsDir.absolutePath, '--all'
+        }
+    }
     
     // 修复控制台输出中文字符的编码问题
     systemProperty 'file.encoding', 'UTF-8'
@@ -65,40 +90,111 @@ task convertScript(type: JavaExec) {
     systemProperty 'sun.stderr.encoding', 'UTF-8'
 }
 
-// 在compileJava之后自动转换
-compileJava.finalizedBy convertScript
-
 // ========================================
 // 部署脚本到Android设备
 // ========================================
-// 使用方法:
-//   1. 通过USB连接Android设备
-//   2. 启用USB调试
-//   3. 运行: gradlew deployScript
-//
-// 自动部署: 取消注释最后一行以启用每次构建后自动部署
+// 用法:
+//   gradlew deployScript -PscriptName=voice_converter              (部署指定脚本)
+//   gradlew deployScript -PscriptName=voice_converter -PdeviceId=xxx  (部署到指定设备)
+//   gradlew runScript -PscriptName=voice_converter                  (转换+部署)
 // ========================================
+
+// 列出所有连接的设备
+task listDevices {
+    group = 'script'
+    description = '列出所有连接的Android设备'
+    
+    doLast {
+        def adbOutput = new ByteArrayOutputStream()
+        exec {
+            commandLine 'adb', 'devices', '-l'
+            standardOutput = adbOutput
+            errorOutput = new ByteArrayOutputStream()
+            ignoreExitValue = true
+        }
+        
+        def output = adbOutput.toString().trim()
+        def lines = output.split('\n')
+        
+        println "\n📱 已连接设备:"
+        println "=" * 60
+        
+        def deviceCount = 0
+        lines.each { line ->
+            if (line.contains('device') && !line.startsWith('List')) {
+                deviceCount++
+                def parts = line.split('\\s+')
+                def deviceId = parts[0]
+                def model = ''
+                def modelMatch = line =~ /model:(\S+)/
+                if (modelMatch) {
+                    model = modelMatch[0][1]
+                }
+                println "  ${deviceCount}. ${deviceId}  ${model}"
+            }
+        }
+        
+        if (deviceCount == 0) {
+            println "  无设备连接"
+        }
+        
+        println "=" * 60
+        println "\n使用方法:"
+        println "  gradlew runScript -PscriptName=xxx -PdeviceId=<设备ID>"
+    }
+}
 
 // 通过ADB将脚本部署到Android设备的任务
 task deployScript(type: Exec) {
-    group = 'deploy'
-    description = '通过ADB将脚本部署到Android设备'
+    group = 'script'
+    description = '通过ADB将指定脚本部署到Android设备'
     
     dependsOn convertScript
     
     doFirst {
-        // 辅助函数:获取脚本名称
+        def deviceId = project.findProperty('deviceId')
+        def inputScriptName = project.findProperty('scriptName')
+        
+        // 读取映射文件获取显示名称
+        def getDisplayName = { String srcName ->
+            def mappingFile = file('dist/.script-mapping')
+            if (mappingFile.exists()) {
+                def mappings = [:]
+                mappingFile.text.split('\n').each { line ->
+                    if (line.contains('=')) {
+                        def parts = line.split('=')
+                        mappings[parts[0].trim()] = parts[1].trim()
+                    }
+                }
+                if (mappings.containsKey(srcName)) {
+                    return mappings[srcName]
+                }
+            }
+            return srcName
+        }
+        
+        // 获取要部署的脚本名称（显示名称，即 dist 中的目录名）
         def getScriptName = {
+            if (inputScriptName) {
+                // 将源目录名转换为显示名称
+                return getDisplayName(inputScriptName)
+            }
+            // 如果没指定，查找 dist 目录下的脚本
             def distDir = new File(project.projectDir, 'dist')
             def scriptDirs = distDir.listFiles({ File f -> f.isDirectory() && !f.name.startsWith('.') } as FileFilter)
             if (scriptDirs && scriptDirs.length > 0) {
+                if (scriptDirs.length > 1) {
+                    println "\n⚠️  发现多个脚本，请使用 -PscriptName=xxx 指定"
+                    println "可用脚本: ${scriptDirs*.name.join(', ')}"
+                    throw new StopExecutionException()
+                }
                 return scriptDirs[0].name
             }
             throw new GradleException('在dist/目录中未找到脚本文件夹')
         }
         
-        // 辅助函数:检查ADB
-        def checkADB = {
+        // 辅助函数:检查ADB并获取设备列表
+        def getDevices = {
             def adbCheck = new ByteArrayOutputStream()
             project.exec {
                 commandLine 'adb', 'devices'
@@ -108,18 +204,38 @@ task deployScript(type: Exec) {
             }
             
             def devicesList = adbCheck.toString().trim()
-            if (!devicesList.contains('device') || devicesList.split('\n').size() < 2) {
-                println "\n⚠️  未检测到Android设备!"
-                println "请连接您的设备并启用USB调试。"
-                throw new StopExecutionException()
+            def devices = []
+            devicesList.split('\n').each { line ->
+                if (line.contains('device') && !line.startsWith('List')) {
+                    devices << line.split('\\s+')[0]
+                }
             }
+            return devices
         }
         
-        try {
-            checkADB()
-        } catch (Exception e) {
-            println "\n⚠️  未找到ADB或设备未连接!"
+        def devices = getDevices()
+        if (devices.isEmpty()) {
+            println "\n⚠️  未检测到Android设备!"
+            println "请连接您的设备并启用USB调试。"
             throw new StopExecutionException()
+        }
+        
+        // 如果有多个设备且未指定，提示用户
+        if (devices.size() > 1 && !deviceId) {
+            println "\n⚠️  发现多个设备，请使用 -PdeviceId=xxx 指定"
+            println "可用设备: ${devices.join(', ')}"
+            throw new StopExecutionException()
+        }
+        
+        def targetDevice = deviceId ?: devices[0]
+        def adbCmd = { List<String> args ->
+            def cmd = ['adb', '-s', targetDevice] + args
+            project.exec {
+                commandLine cmd
+                standardOutput = new ByteArrayOutputStream()
+                errorOutput = new ByteArrayOutputStream()
+                ignoreExitValue = true
+            }
         }
         
         def scriptName = getScriptName()
@@ -127,10 +243,11 @@ task deployScript(type: Exec) {
         def targetPath = "/storage/emulated/0/Android/data/com.tencent.mobileqq/QStory/Plugin/${scriptName}"
         
         println "\n📱 正在部署脚本: ${scriptName}"
+        println "目标设备: ${targetDevice}"
         println "创建目录: ${targetPath}"
         
         project.exec {
-            commandLine 'adb', 'shell', 'mkdir', '-p', targetPath
+            commandLine 'adb', '-s', targetDevice, 'shell', 'mkdir', '-p', targetPath
             ignoreExitValue = true
         }
         
@@ -143,7 +260,7 @@ task deployScript(type: Exec) {
                 
                 println "  ✓ ${relativePath}"
                 project.exec {
-                    commandLine 'adb', 'push', file.absolutePath, targetFile
+                    commandLine 'adb', '-s', targetDevice, 'push', file.absolutePath, targetFile
                     standardOutput = new ByteArrayOutputStream()
                     errorOutput = new ByteArrayOutputStream()
                 }
@@ -156,7 +273,7 @@ task deployScript(type: Exec) {
         emptyErrorFile.text = ''
         println "  ✓ error.txt (空文件)"
         project.exec {
-            commandLine 'adb', 'push', emptyErrorFile.absolutePath, "${targetPath}/error.txt"
+            commandLine 'adb', '-s', targetDevice, 'push', emptyErrorFile.absolutePath, "${targetPath}/error.txt"
             standardOutput = new ByteArrayOutputStream()
             errorOutput = new ByteArrayOutputStream()
         }
@@ -168,27 +285,134 @@ task deployScript(type: Exec) {
     commandLine 'cmd', '/c', 'echo.'
 }
 
+// 转换并部署脚本（快捷命令）
+// 用法: gradlew runScript -PscriptName=voice_converter [-PdeviceId=xxx]
+task runScript {
+    group = 'script'
+    description = '转换并部署脚本（快捷命令）'
+    dependsOn deployScript
+}
 
-// 可选: 转换成功后自动部署(不需要时注释掉)
-convertScript.finalizedBy deployScript
+// ========================================
+// 脚本管理任务
+// ========================================
+
+// 列出所有可用脚本
+task listScripts {
+    group = 'script'
+    description = '列出所有可用脚本'
+    
+    doLast {
+        def scriptsDir = file('src/main/java/me/mm/qs/scripts')
+        def scripts = scriptsDir.listFiles()?.findAll { it.isDirectory() }
+        
+        println "\n📚 可用脚本:"
+        println "=" * 40
+        scripts?.each { dir ->
+            def mainFile = new File(dir, 'Main.java')
+            if (mainFile.exists()) {
+                // 试图读取脚本名称
+                def content = mainFile.text
+                def nameMatch = content =~ /name\s*=\s*"([^"]+)"/
+                def displayName = nameMatch ? nameMatch[0][1] : dir.name
+                println "  • ${dir.name} -> ${displayName}"
+            } else {
+                println "  • ${dir.name} (无Main.java)"
+            }
+        }
+        println "=" * 40
+        println "\n使用方法:"
+        println "  gradlew listDevices                             列出设备"
+        println "  gradlew runScript -PscriptName=<名称>           转换+部署"
+        println "  gradlew convertScript -PscriptName=<名称>       仅转换"
+        println "  gradlew deployScript -PscriptName=<名称>        仅部署"
+        println "  gradlew fetchError -PscriptName=<名称>          获取错误"
+        println "  gradlew createScript -PscriptName=<名称>        创建新脚本"
+        println "\n设备选择: 添加 -PdeviceId=xxx 可指定目标设备"
+    }
+}
+
+// 创建新脚本
+// 用法: gradlew createScript -PscriptName=my_new_script -PdisplayName="我的新脚本"
+task createScript {
+    group = 'script'
+    description = '创建新脚本(从模板复制)'
+    
+    doLast {
+        def scriptName = project.findProperty('scriptName')
+        def displayName = project.findProperty('displayName') ?: scriptName
+        
+        if (!scriptName) {
+            throw new GradleException('请指定脚本名称: -PscriptName=xxx')
+        }
+        
+        def scriptsDir = file('src/main/java/me/mm/qs/scripts')
+        def templateDir = new File(scriptsDir, 'example')
+        def newScriptDir = new File(scriptsDir, scriptName)
+        
+        if (newScriptDir.exists()) {
+            throw new GradleException("脚本已存在: ${scriptName}")
+        }
+        
+        if (!templateDir.exists()) {
+            throw new GradleException('模板脚本(example)不存在')
+        }
+        
+        // 复制模板目录
+        copy {
+            from templateDir
+            into newScriptDir
+        }
+        
+        // 更新包名和脚本信息
+        def mainFile = new File(newScriptDir, 'Main.java')
+        if (mainFile.exists()) {
+            def content = mainFile.text
+            content = content.replace('me.mm.qs.scripts.example', "me.mm.qs.scripts.${scriptName}")
+            content = content.replace('name = "示例脚本"', "name = \"${displayName}\"")
+            content = content.replace('这是一个示例脚本模板', "脚本: ${displayName}")
+            mainFile.text = content
+        }
+        
+        println "\n✨ 脚本创建成功!"
+        println "📂 位置: ${newScriptDir.absolutePath}"
+        println "\n下一步:"
+        println "  1. 编辑 Main.java 实现你的功能"
+        println "  2. gradlew deployScript -PscriptName=${scriptName}"
+    }
+}
 
 // 从Android设备获取error.txt的任务
+// 用法: gradlew fetchError -PscriptName=voice_converter [-PdeviceId=xxx]
 task fetchError(type: Exec) {
-    group = 'deploy'
+    group = 'script'
     description = '从Android设备获取error.txt用于分析'
     
     doFirst {
-        // 复用辅助函数
+        def deviceId = project.findProperty('deviceId')
+        
+        // 获取要查询的脚本名称
         def getScriptName = {
+            def scriptName = project.findProperty('scriptName')
+            if (scriptName) {
+                return scriptName
+            }
+            // 如果没指定，查找 dist 目录下的脚本
             def distDir = new File(project.projectDir, 'dist')
             def scriptDirs = distDir.listFiles({ File f -> f.isDirectory() && !f.name.startsWith('.') } as FileFilter)
             if (scriptDirs && scriptDirs.length > 0) {
+                if (scriptDirs.length > 1) {
+                    println "\n⚠️  发现多个脚本，请使用 -PscriptName=xxx 指定"
+                    println "可用脚本: ${scriptDirs*.name.join(', ')}"
+                    throw new StopExecutionException()
+                }
                 return scriptDirs[0].name
             }
             throw new GradleException('在dist/目录中未找到脚本文件夹')
         }
         
-        def checkADB = {
+        // 获取设备列表
+        def getDevices = {
             def adbCheck = new ByteArrayOutputStream()
             project.exec {
                 commandLine 'adb', 'devices'
@@ -198,29 +422,39 @@ task fetchError(type: Exec) {
             }
             
             def devicesList = adbCheck.toString().trim()
-            if (!devicesList.contains('device') || devicesList.split('\n').size() < 2) {
-                println "\n⚠️  No Android device detected!"
-                println "Please connect your device and enable USB debugging."
-                throw new StopExecutionException()
+            def devices = []
+            devicesList.split('\n').each { line ->
+                if (line.contains('device') && !line.startsWith('List')) {
+                    devices << line.split('\\s+')[0]
+                }
             }
+            return devices
         }
         
-        try {
-            checkADB()
-        } catch (Exception e) {
-            println "\n⚠️  ADB not found or device not connected!"
+        def devices = getDevices()
+        if (devices.isEmpty()) {
+            println "\n⚠️  未检测到Android设备!"
             throw new StopExecutionException()
         }
+        
+        if (devices.size() > 1 && !deviceId) {
+            println "\n⚠️  发现多个设备，请使用 -PdeviceId=xxx 指定"
+            println "可用设备: ${devices.join(', ')}"
+            throw new StopExecutionException()
+        }
+        
+        def targetDevice = deviceId ?: devices[0]
         
         def scriptName = getScriptName()
         def sourcePath = "/storage/emulated/0/Android/data/com.tencent.mobileqq/QStory/Plugin/${scriptName}/error.txt"
         def targetFile = new File(project.projectDir, 'error.txt')
         
-        println "\n📥 正在获取error.txt从: ${scriptName}"
-        println "源路径: ${sourcePath}"
+        println "\n📥 正在获取error.txt"
+        println "脚本: ${scriptName}"
+        println "设备: ${targetDevice}"
         
         def pullExec = project.exec {
-            commandLine 'adb', 'pull', sourcePath, targetFile.absolutePath
+            commandLine 'adb', '-s', targetDevice, 'pull', sourcePath, targetFile.absolutePath
             standardOutput = new ByteArrayOutputStream()
             errorOutput = new ByteArrayOutputStream()
             ignoreExitValue = true
