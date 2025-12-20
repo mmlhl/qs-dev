@@ -102,7 +102,8 @@ public class Main extends QScriptBase {
         }
         // 为语音消息添加解码菜单
         if (msg.MessageType == type.VOICE) {
-            addMenuItem("解码为PCM", "saveVoice");
+            addMenuItem("PCM", "saveVoice");
+            addMenuItem("WAV", "saveVoiceAsWav");
         }
     }
 
@@ -116,6 +117,31 @@ public class Main extends QScriptBase {
         MessageType type = new MessageType();
         if (msg.MessageType == type.VOICE) {
             String pcmPath = audioDecoder.decodeVoiceMessage(msg.LocalPath);
+        } else {
+            toast("这不是语音消息");
+        }
+    }
+
+    // Custom menu callback - 解码语音为WAV（可直接播放）
+    public void saveVoiceAsWav(MessageData msg) {
+        MessageType type = new MessageType();
+        if (msg.MessageType == type.VOICE) {
+            // 第一步：解码为 PCM
+            toast("开始解码: " + msg.LocalPath);
+            String pcmPath = audioDecoder.decodeVoiceMessage(msg.LocalPath);
+            if (pcmPath == null) {
+                toast("解码失败");
+                return;
+            }
+            
+            // 第二步：转换为 WAV（使用实际采样率）
+            int sampleRate = audioDecoder.getLastSampleRate();
+            String wavPath = pcmPath.replace(".pcm", ".wav");
+            toast("开始转换: " + pcmPath);
+            boolean success = wavConverter.convertPcmToWav(pcmPath, wavPath, sampleRate, 1, 16);
+            if (success) {
+                toast("已保存为WAV: " + wavPath);
+            }
         } else {
             toast("这不是语音消息");
         }

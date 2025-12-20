@@ -27,6 +27,7 @@ public class PcmToWavConverter extends QScriptBase {
         FileInputStream fis = null;
         FileOutputStream fos = null;
 
+        toast("开始转换: " + pcmPath);
         try {
             fis = new FileInputStream(pcmPath);
             fos = new FileOutputStream(wavPath);
@@ -69,7 +70,7 @@ public class PcmToWavConverter extends QScriptBase {
      * @return 转换是否成功
      */
     public boolean convertPcmToWav(String pcmPath, String wavPath) {
-        return convertPcmToWav(pcmPath, wavPath, 24000, 1, 16);
+        return convertPcmToWav(pcmPath, wavPath, 16000, 1, 16);
     }
 
     /**
