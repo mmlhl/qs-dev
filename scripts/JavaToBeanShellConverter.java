@@ -596,10 +596,42 @@ public class JavaToBeanShellConverter {
     private static List<String> extractLoadStatements(CompilationUnit cu, Path projectRoot, Path scriptRoot) {
         List<String> loadStatements = new ArrayList<>();
         
-        // 动态获取当前脚本的包名前缀 (e.g., "me.mm.qs.scripts.voice_converter")
+        // 从 Main.java 获取脚本根目录的包名前缀 (e.g., "me.mm.qs.scripts.voice_converter")
+        // 这样所有文件的 import 都相对于脚本根目录解析，而不是当前文件的 package
         String scriptPackagePrefix = "";
-        if (cu.getPackageDeclaration().isPresent()) {
-            scriptPackagePrefix = cu.getPackageDeclaration().get().getNameAsString() + ".";
+        Path mainFile = scriptRoot.resolve("Main.java");
+        if (Files.exists(mainFile)) {
+            try {
+                FileInputStream mainIn = new FileInputStream(mainFile.toFile());
+                ParseResult<CompilationUnit> mainParseResult = new JavaParser(new ParserConfiguration()).parse(mainIn);
+                mainIn.close();
+                if (mainParseResult.isSuccessful() && mainParseResult.getResult().get().getPackageDeclaration().isPresent()) {
+                    scriptPackagePrefix = mainParseResult.getResult().get().getPackageDeclaration().get().getNameAsString() + ".";
+                }
+            } catch (IOException e) {
+                // Fall back to current file's package
+                if (cu.getPackageDeclaration().isPresent()) {
+                    scriptPackagePrefix = cu.getPackageDeclaration().get().getNameAsString() + ".";
+                }
+            }
+        } else if (cu.getPackageDeclaration().isPresent()) {
+            // Fallback: 从当前文件的 package 推断（移除子包部分）
+            String currentPackage = cu.getPackageDeclaration().get().getNameAsString();
+            // 尝试找到脚本根包名（去掉 .utils, .constants 等子包）
+            String[] parts = currentPackage.split("\\.");
+            if (parts.length > 0) {
+                // 假设脚本根包名是最后一个不是常见子包名的部分
+                StringBuilder rootPackage = new StringBuilder();
+                for (int i = 0; i < parts.length; i++) {
+                    if (i > 0) rootPackage.append(".");
+                    rootPackage.append(parts[i]);
+                    // 如果遇到 scripts.xxx 后的第一个部分，就停止
+                    if (i >= 3 && parts[i-1].equals("scripts")) {
+                        break;
+                    }
+                }
+                scriptPackagePrefix = rootPackage.toString() + ".";
+            }
         }
         final String packagePrefix = scriptPackagePrefix;
         
