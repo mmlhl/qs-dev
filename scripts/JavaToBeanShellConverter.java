@@ -565,33 +565,57 @@ public class JavaToBeanShellConverter {
                                     .ifPresent(globalInstanceAnno -> {
                                         String className = classDecl.getNameAsString();
                                         
-                                        // Use class name as variable name (same name)
-                                        String varName = className;
+                                        // Check if this class also has @ScriptMethods annotation
+                                        boolean hasScriptMethods = classDecl.getAnnotations().stream()
+                                            .anyMatch(anno -> anno.getNameAsString().equals("ScriptMethods"));
                                         
-                                        // Store mapping: ClassName -> globalVarName (same)
+                                        // For constant classes (without @ScriptMethods), use renamed class name
+                                        // For data classes (with @ScriptMethods), use original class name
+                                        String varName = className;
+                                        String actualClassName = className;
+                                        
+                                        if (!hasScriptMethods) {
+                                            // This is a constant class, will be renamed as Prefix_ClassName
+                                            String classRelativePath = scriptRoot.relativize(javaFile.getParent()).toString();
+                                            if (!classRelativePath.isEmpty() && !classRelativePath.equals(".")) {
+                                                String pathPrefix = classRelativePath.replace(File.separatorChar, '_')
+                                                    .replace('-', '_');
+                                                pathPrefix = pathPrefix.substring(0, 1).toUpperCase() + pathPrefix.substring(1);
+                                                actualClassName = pathPrefix + "_" + className;
+                                                // For constant classes, use renamed class name as variable name
+                                                varName = actualClassName;
+                                            }
+                                        }
+                                        
+                                        // Store mapping: ClassName -> renamedClassName (for reference conversion)
                                         globalInstanceMap.put(className, varName);
                                         
                                         // Generate class definition with static fields
                                         StringBuilder classCode = new StringBuilder();
-                                        classCode.append("class ").append(className).append(" {\n");
                                         
-                                        // Add static fields (without 'static' keyword in BeanShell)
-                                        classDecl.getFields().forEach(field -> {
-                                            if (field.isStatic() && field.isPublic()) {
-                                                field.getVariables().forEach(var -> {
-                                                    String fieldName = var.getNameAsString();
-                                                    var.getInitializer().ifPresent(init -> {
-                                                        classCode.append("    ").append(fieldName).append(" = ");
-                                                        classCode.append(printer.print(init)).append(";\n");
+                                        // Only generate class definition for @ScriptMethods classes
+                                        // Constant classes are already defined in their own files
+                                        if (hasScriptMethods) {
+                                            classCode.append("class ").append(className).append(" {\n");
+                                            
+                                            // Add static fields (without 'static' keyword in BeanShell)
+                                            classDecl.getFields().forEach(field -> {
+                                                if (field.isStatic() && field.isPublic()) {
+                                                    field.getVariables().forEach(var -> {
+                                                        String fieldName = var.getNameAsString();
+                                                        var.getInitializer().ifPresent(init -> {
+                                                            classCode.append("    ").append(fieldName).append(" = ");
+                                                            classCode.append(printer.print(init)).append(";\n");
+                                                        });
                                                     });
-                                                });
-                                            }
-                                        });
+                                                }
+                                            });
+                                            
+                                            classCode.append("}\n");
+                                        }
                                         
-                                        classCode.append("}\n");
-                                        
-                                        // Generate instance statement: ClassName = new ClassName();
-                                        String instanceStmt = classCode.toString() + varName + " = new " + className + "();";
+                                        // Generate instance statement: VarName = new ActualClassName();
+                                        String instanceStmt = classCode.toString() + varName + " = new " + actualClassName + "();";
                                         instanceStatements.add(instanceStmt);
                                     });
                             });

@@ -74,12 +74,11 @@ public class Main extends QScriptBase {
         }
         
         // 注释掉测试代码，避免BeanShell命名空间问题
-        /*
         // 测试新增的工具方法
         if (messageHandler.containsKeyword(text, "测试")) {
             toast("检测到关键词:测试");
         }
-        
+
         // 使用模块方法处理禁言命令
         if (messageHandler.isMuteCommand(msg)) {
             int banTime = messageHandler.parseTimeBymessage(msg);
@@ -92,7 +91,6 @@ public class Main extends QScriptBase {
                 }
             }
         }
-        */
     }
 
     @Override
@@ -103,20 +101,15 @@ public class Main extends QScriptBase {
         }
         // 为语音消息添加解码菜单
         if (msg.MessageType == type.VOICE) {
-            addMenuItem("PCM", "saveVoice");
+//            addMenuItem("PCM", "saveVoice");
             addMenuItem("WAV", "saveVoiceAsWav");
         }
     }
 
-    // Custom menu callback
-    public void showGroup(MessageData msg) {
-        toast("提示在" + msg.MessageType);
-    }
 
     // Custom menu callback - 解码语音为PCM
     public void saveVoice(MessageData msg) {
-        MessageType type = new MessageType();
-        if (msg.MessageType == type.VOICE) {
+        if (msg.MessageType == MessageType.VOICE) {
             String pcmPath = audioDecoder.decodeVoiceMessage(msg.LocalPath);
         } else {
             toast("这不是语音消息");
@@ -125,14 +118,14 @@ public class Main extends QScriptBase {
 
     // Custom menu callback - 解码语音为WAV（可直接播放）
     public void saveVoiceAsWav(MessageData msg) {
-        MessageType type = new MessageType();
-        if (msg.MessageType == type.VOICE) {
-
+        if (msg.MessageType == MessageType.VOICE) {
             String pcmPath = audioDecoder.decodeVoiceMessage(msg.LocalPath);
             if (pcmPath == null) {
                 toast("解码失败");
                 return;
             }
+            //删除源文件
+            context.deleteFile(pcmPath);
             
             // 第二步：转换为 WAV（使用动态采样率和位深度）
             String wavPath = pcmPath.replace(".pcm", ".wav");
