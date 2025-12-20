@@ -15,6 +15,8 @@
 @rem
 
 @if "%DEBUG%" == "" @echo off
+@rem Set UTF-8 encoding for Chinese characters
+@chcp 65001 >nul 2>&1
 @rem ##########################################################################
 @rem
 @rem  Gradle startup script for Windows
