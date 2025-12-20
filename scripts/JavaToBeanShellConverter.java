@@ -52,6 +52,9 @@ public class JavaToBeanShellConverter {
     // 类名映射表: 原始类名 -> 重命名后的类名
     private static final Map<String, String> classNameMap = new HashMap<>();
     
+    // 全局实例映射表: 类名 -> 全局变量名 (用于 @GlobalInstance 注解的类)
+    private static final Map<String, String> globalInstanceMap = new HashMap<>();
+    
     private static final Set<String> BEANSHELL_TYPES = new HashSet<>();
     
     // 全局跟踪已加载的模块,避免重复 load
@@ -89,6 +92,8 @@ public class JavaToBeanShellConverter {
         loadedModules.get().clear();
         // 清空类名映射表
         classNameMap.clear();
+        // 清空全局实例映射表
+        globalInstanceMap.clear();
         
         // Find project root
         Path projectRoot = scriptPath;
@@ -186,12 +191,18 @@ public class JavaToBeanShellConverter {
             });
             
             // Convert Globals.xxx to xxx (global variables)
+            // Convert ClassName.staticField to globalVarName.staticField for @GlobalInstance classes
             converted.getBody().get().findAll(FieldAccessExpr.class).forEach(fieldAccess -> {
                 if (fieldAccess.getScope().isNameExpr()) {
                     String scopeName = fieldAccess.getScope().asNameExpr().getNameAsString();
                     if (scopeName.equals("Globals")) {
                         // Replace Globals.myUin with just myUin
                         fieldAccess.replace(fieldAccess.getNameAsExpression());
+                    } else if (globalInstanceMap.containsKey(scopeName)) {
+                        // Convert ClassName.staticField to globalVarName.staticField
+                        // e.g. SilkAudioDecoder.lastSampleRate -> audioDecoder.lastSampleRate
+                        String globalVarName = globalInstanceMap.get(scopeName);
+                        fieldAccess.getScope().asNameExpr().setName(globalVarName);
                     }
                     // 常量类引用保持不变: MessageType.VOICE
                     // 因为已经自动实例化了 MessageType = new Constants_MessageType()
@@ -274,7 +285,17 @@ public class JavaToBeanShellConverter {
         // 先收集所有常量类的映射关系（从依赖文件中）
         collectClassNameMappings(cu, scriptRoot);
         
-        // Extract and convert imports to load() calls (for all files)
+        // STEP 1: Generate global instances FIRST (before load statements)
+        // This ensures imported files can access these global variables
+        List<String> globalInstances = extractGlobalInstances(cu, scriptRoot);
+        if (!globalInstances.isEmpty()) {
+            for (String instanceStmt : globalInstances) {
+                beanShellCode.append(instanceStmt).append("\n");
+            }
+            beanShellCode.append("\n");
+        }
+        
+        // STEP 2: Extract and convert imports to load() calls
         List<String> loadStatements = extractLoadStatements(cu, projectRoot, scriptRoot);
         if (!loadStatements.isEmpty()) {
             for (String loadStmt : loadStatements) {
@@ -287,8 +308,16 @@ public class JavaToBeanShellConverter {
         cu.findAll(ClassOrInterfaceDeclaration.class).forEach(classDecl -> {
             boolean hasScriptMethodsAnnotation = classDecl.getAnnotations().stream()
                     .anyMatch(anno -> anno.getNameAsString().equals("ScriptMethods"));
+            boolean hasGlobalInstanceAnnotation = classDecl.getAnnotations().stream()
+                    .anyMatch(anno -> anno.getNameAsString().equals("GlobalInstance"));
 
             if (hasScriptMethodsAnnotation) {
+                // Skip @GlobalInstance classes - they are already generated as global variables
+                if (hasGlobalInstanceAnnotation) {
+                    return;
+                }
+                
+                // For regular @ScriptMethods classes: Extract methods only
                 // Skip utility instance fields (messageHandler, helper, etc.)
                 // These are only for IDE support and not needed in BeanShell
                 
@@ -494,6 +523,87 @@ public class JavaToBeanShellConverter {
         });
         
         return loadStatements;
+    }
+    
+    /**
+     * Scan imported classes and generate global instance initialization for @GlobalInstance annotated classes
+     * Returns list of class definitions and instance initialization statements
+     * e.g. "class AudioDecoderState { ... }\nAudioDecoderState = new AudioDecoderState();"
+     * Also populates globalInstanceMap for static field access conversion
+     * 
+     * IMPORTANT: Global instances are generated BEFORE load statements,
+     * so imported files can access these global variables
+     */
+    private static List<String> extractGlobalInstances(CompilationUnit cu, Path scriptRoot) {
+        List<String> instanceStatements = new ArrayList<>();
+        PrettyPrinterConfiguration printerConfig = new PrettyPrinterConfiguration();
+        printerConfig.setIndentSize(4);
+        PrettyPrinter printer = new PrettyPrinter(printerConfig);
+        
+        cu.getImports().forEach(importDecl -> {
+            String importName = importDecl.getNameAsString();
+            // Only process non-static imports from myscript package
+            if (!importDecl.isStatic() && importName.startsWith("me.mm.qs.myscript.")) {
+                // Get the class file path
+                String relativePath = importName.substring("me.mm.qs.myscript.".length());
+                String filePath = relativePath.replace('.', '/');
+                Path javaFile = scriptRoot.resolve(filePath + ".java");
+                
+                if (Files.exists(javaFile)) {
+                    try {
+                        FileInputStream in = new FileInputStream(javaFile.toFile());
+                        ParseResult<CompilationUnit> parseResult = new JavaParser(new ParserConfiguration()).parse(in);
+                        in.close();
+                        
+                        if (parseResult.isSuccessful()) {
+                            CompilationUnit importedCu = parseResult.getResult().get();
+                            // Find classes with @GlobalInstance annotation
+                            importedCu.findAll(ClassOrInterfaceDeclaration.class).forEach(classDecl -> {
+                                classDecl.getAnnotations().stream()
+                                    .filter(anno -> anno.getNameAsString().equals("GlobalInstance"))
+                                    .findFirst()
+                                    .ifPresent(globalInstanceAnno -> {
+                                        String className = classDecl.getNameAsString();
+                                        
+                                        // Use class name as variable name (same name)
+                                        String varName = className;
+                                        
+                                        // Store mapping: ClassName -> globalVarName (same)
+                                        globalInstanceMap.put(className, varName);
+                                        
+                                        // Generate class definition with static fields
+                                        StringBuilder classCode = new StringBuilder();
+                                        classCode.append("class ").append(className).append(" {\n");
+                                        
+                                        // Add static fields (without 'static' keyword in BeanShell)
+                                        classDecl.getFields().forEach(field -> {
+                                            if (field.isStatic() && field.isPublic()) {
+                                                field.getVariables().forEach(var -> {
+                                                    String fieldName = var.getNameAsString();
+                                                    var.getInitializer().ifPresent(init -> {
+                                                        classCode.append("    ").append(fieldName).append(" = ");
+                                                        classCode.append(printer.print(init)).append(";\n");
+                                                    });
+                                                });
+                                            }
+                                        });
+                                        
+                                        classCode.append("}\n");
+                                        
+                                        // Generate instance statement: ClassName = new ClassName();
+                                        String instanceStmt = classCode.toString() + varName + " = new " + className + "();";
+                                        instanceStatements.add(instanceStmt);
+                                    });
+                            });
+                        }
+                    } catch (IOException e) {
+                        // Ignore errors
+                    }
+                }
+            }
+        });
+        
+        return instanceStatements;
     }
 
     /**
