@@ -312,6 +312,28 @@ public class JavaToBeanShellConverter {
         beanShellCode.append("// DO NOT EDIT - Changes will be overwritten\n");
         beanShellCode.append("// ================================================\n\n");
 
+        // 保留外部 import（非本项目的 import）
+        List<String> externalImports = new ArrayList<>();
+        cu.getImports().forEach(importDecl -> {
+            String importName = importDecl.getNameAsString();
+            // 跳过本项目的 import (me.mm.qs.*)
+            if (importName.startsWith("me.mm.qs.")) {
+                return;
+            }
+            // 保留外部 import (android.*, java.*, 等)
+            if (importDecl.isStatic()) {
+                externalImports.add("import static " + importName + (importDecl.isAsterisk() ? ".*" : "") + ";");
+            } else {
+                externalImports.add("import " + importName + (importDecl.isAsterisk() ? ".*" : "") + ";");
+            }
+        });
+        if (!externalImports.isEmpty()) {
+            for (String imp : externalImports) {
+                beanShellCode.append(imp).append("\n");
+            }
+            beanShellCode.append("\n");
+        }
+
         // 先递归收集所有依赖,添加到已加载列表
         collectAllDependencies(cu, scriptRoot, loadedModules.get());
         

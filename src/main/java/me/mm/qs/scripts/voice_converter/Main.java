@@ -11,6 +11,13 @@ import me.mm.qs.scripts.voice_converter.utils.SilkAudioDecoder;
 import me.mm.qs.scripts.voice_converter.utils.PcmToWavConverter;
 import me.mm.qs.scripts.voice_converter.utils.AudioDecoderState;
 
+import android.app.Activity;
+import android.app.AlertDialog;
+import android.content.DialogInterface;
+import android.widget.EditText;
+import android.widget.LinearLayout;
+import android.widget.TextView;
+
 import java.io.File;
 
 import static me.mm.qs.script.Globals.*;
@@ -108,31 +115,127 @@ public class Main extends QScriptBase {
 
     // Custom menu callback - 解码语音为WAV（可直接播放）
     public void saveVoiceAsWav(MessageData msg) {
-        if (msg.MessageType == MessageType.VOICE) {
-            String pcmPath = null;
-            try {
-                 pcmPath = audioDecoder.decodeVoiceMessage(msg.LocalPath);
-                if (pcmPath == null) {
-                    toast("解码失败");
-                    return;
-                }
-
-                String wavPath = pcmPath.replace(".pcm", ".wav");
-
-                boolean success = wavConverter.convertPcmToWav(
-                    pcmPath,
-                    wavPath,
-                    AudioDecoderState.lastSampleRate,
-                    AudioDecoderState.lastChannels,
-                    AudioDecoderState.lastBitDepth
-                );
-            } finally {
-                if (pcmPath != null) {
-                    new File(pcmPath).delete();
-                }
-            }
-        } else {
+        if (msg.MessageType != MessageType.VOICE) {
             toast("这不是语音消息");
+            return;
+        }
+        
+        // 获取原始文件名（不含路径和后缀）
+        String localPath = msg.LocalPath;
+        String originalName = localPath.substring(localPath.lastIndexOf("/") + 1);
+        if (originalName.contains(".")) {
+            originalName = originalName.substring(0, originalName.lastIndexOf("."));
+        }
+        String defaultFileName = originalName + ".wav";
+        
+        // 默认下载路径
+        String defaultPath = "/storage/emulated/0/Download";
+        
+        // 显示保存对话框
+        showSaveDialog(msg, defaultFileName, defaultPath);
+    }
+    
+    // 显示保存对话框
+    private void showSaveDialog(final MessageData msg, final String defaultFileName, final String defaultPath) {
+        final android.app.Activity activity = getActivity();
+        if (activity == null) {
+            toast("无法获取Activity");
+            return;
+        }
+        
+        // 必须在主线程显示对话框
+        activity.runOnUiThread(new Runnable() {
+            public void run() {
+                // 创建垂直布局
+                LinearLayout layout = new LinearLayout(context);
+                layout.setOrientation(LinearLayout.VERTICAL);
+                layout.setPadding(50, 30, 50, 10);
+                
+                // 文件名标签和输入框
+                TextView label1 = new TextView(context);
+                label1.setText("文件名:");
+                label1.setPadding(0, 20, 0, 5);
+                
+                final EditText fileNameEdit = new EditText(context);
+                fileNameEdit.setHint("文件名");
+                fileNameEdit.setText(defaultFileName);
+                fileNameEdit.setSingleLine(true);
+                
+                // 路径标签和输入框
+                TextView label2 = new TextView(context);
+                label2.setText("保存路径:");
+                label2.setPadding(0, 20, 0, 5);
+                
+                final EditText pathEdit = new EditText(context);
+                pathEdit.setHint("保存路径");
+                pathEdit.setText(defaultPath);
+                pathEdit.setSingleLine(true);
+                
+                // 添加到布局
+                layout.addView(label1);
+                layout.addView(fileNameEdit);
+                layout.addView(label2);
+                layout.addView(pathEdit);
+                
+                // 创建并显示对话框 (使用 Material 风格)
+                new AlertDialog.Builder(activity, android.R.style.Theme_DeviceDefault_Light_Dialog_Alert)
+                    .setTitle("保存WAV文件")
+                    .setView(layout)
+                    .setPositiveButton("保存", new DialogInterface.OnClickListener() {
+                        public void onClick(DialogInterface dialog, int which) {
+                            String fileName = fileNameEdit.getText().toString().trim();
+                            String savePath = pathEdit.getText().toString().trim();
+                            
+                            // 处理路径末尾的斜杠
+                            if (savePath.endsWith("/") || savePath.endsWith("\\")) {
+                                savePath = savePath.substring(0, savePath.length() - 1);
+                            }
+                            
+                            // 确保文件名有 .wav 后缀
+                            if (!fileName.toLowerCase().endsWith(".wav")) {
+                                fileName = fileName + ".wav";
+                            }
+                            
+                            String fullPath = savePath + "/" + fileName;
+                            doSaveWav(msg, fullPath);
+                        }
+                    })
+                    .setNegativeButton("取消", null)
+                    .show();
+            }
+        });
+    }
+    
+    // 实际执行WAV保存
+    private void doSaveWav(MessageData msg, String wavPath) {
+        String pcmPath = null;
+        try {
+            pcmPath = audioDecoder.decodeVoiceMessage(msg.LocalPath);
+            if (pcmPath == null) {
+                toast("解码失败");
+                return;
+            }
+            
+            boolean success = wavConverter.convertPcmToWav(
+                pcmPath,
+                wavPath,
+                AudioDecoderState.lastSampleRate,
+                AudioDecoderState.lastChannels,
+                AudioDecoderState.lastBitDepth
+            );
+            
+            if (success) {
+                toast("已保存到: " + wavPath);
+            } else {
+                toast("保存失败");
+            }
+        } catch (Exception e) {
+            error(e);
+            toast("保存失败: " + e.getMessage());
+        } finally {
+            if (pcmPath != null) {
+                new File(pcmPath).delete();
+            }
         }
     }
 
