@@ -405,7 +405,7 @@ task createScript {
     }
 }
 
-// 从Android设备获取error.txt的任务
+// 从 Android 设备获取 error.txt 的任务
 // 用法: gradlew fetchError -PscriptName=voice_converter [-PdeviceId=xxx]
 task fetchError(type: Exec) {
     group = 'script'
@@ -413,12 +413,31 @@ task fetchError(type: Exec) {
     
     doFirst {
         def deviceId = project.findProperty('deviceId')
+        def inputScriptName = project.findProperty('scriptName')
         
-        // 获取要查询的脚本名称
+        // 读取映射文件获取显示名称
+        def getDisplayName = { String srcName ->
+            def mappingFile = file('dist/.script-mapping')
+            if (mappingFile.exists()) {
+                def mappings = [:]
+                mappingFile.text.split('\n').each { line ->
+                    if (line.contains('=')) {
+                        def parts = line.split('=')
+                        mappings[parts[0].trim()] = parts[1].trim()
+                    }
+                }
+                if (mappings.containsKey(srcName)) {
+                    return mappings[srcName]
+                }
+            }
+            return srcName
+        }
+        
+        // 获取要查询的脚本名称（显示名称）
         def getScriptName = {
-            def scriptName = project.findProperty('scriptName')
-            if (scriptName) {
-                return scriptName
+            if (inputScriptName) {
+                // 将源目录名转换为显示名称
+                return getDisplayName(inputScriptName)
             }
             // 如果没指定，查找 dist 目录下的脚本
             def distDir = new File(project.projectDir, 'dist')

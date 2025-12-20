@@ -581,7 +581,7 @@ public class JavaToBeanShellConverter {
     }
 
     /**
-     * Extract imports from myscript package and convert to load() statements
+     * Extract imports from script package and convert to load() statements
      * Skip files with @GlobalInstance annotation (they are defined in main.java)
      * 
      * 注意:由于BeanShell类定义可以重复加载,我们不再使用loaded列表
@@ -590,16 +590,23 @@ public class JavaToBeanShellConverter {
     private static List<String> extractLoadStatements(CompilationUnit cu, Path projectRoot, Path scriptRoot) {
         List<String> loadStatements = new ArrayList<>();
         
+        // 动态获取当前脚本的包名前缀 (e.g., "me.mm.qs.scripts.voice_converter")
+        String scriptPackagePrefix = "";
+        if (cu.getPackageDeclaration().isPresent()) {
+            scriptPackagePrefix = cu.getPackageDeclaration().get().getNameAsString() + ".";
+        }
+        final String packagePrefix = scriptPackagePrefix;
+        
         cu.getImports().forEach(importDecl -> {
             String importName = importDecl.getNameAsString();
             // 跳过 Globals 的静态导入 (这些会变成全局变量)
             if (importDecl.isStatic() && importName.startsWith("me.mm.qs.script.Globals")) {
                 return;
             }
-            // 检查是否来自 myscript 包 (非静态导入)
-            if (!importDecl.isStatic() && importName.startsWith("me.mm.qs.myscript.")) {
-                // 提取完整路径: me.mm.qs.myscript.utils.MessageHandler -> utils/MessageHandler
-                String relativePath = importName.substring("me.mm.qs.myscript.".length());
+            // 检查是否来自当前脚本包 (非静态导入)
+            if (!importDecl.isStatic() && !packagePrefix.isEmpty() && importName.startsWith(packagePrefix)) {
+                // 提取相对路径: me.mm.qs.scripts.voice_converter.utils.MessageHandler -> utils/MessageHandler
+                String relativePath = importName.substring(packagePrefix.length());
                 String filePath = relativePath.replace('.', '/');
                 Path javaFile = scriptRoot.resolve(filePath + ".java");
                 
