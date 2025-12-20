@@ -26,8 +26,6 @@ public class PcmToWavConverter extends QScriptBase {
     public boolean convertPcmToWav(String pcmPath, String wavPath, int sampleRate, int channels, int bitDepth) {
         FileInputStream fis = null;
         FileOutputStream fos = null;
-
-        toast("开始转换: " + pcmPath);
         try {
             fis = new FileInputStream(pcmPath);
             fos = new FileOutputStream(wavPath);
@@ -44,8 +42,6 @@ public class PcmToWavConverter extends QScriptBase {
             while ((bytesRead = fis.read(buffer)) != -1) {
                 fos.write(buffer, 0, bytesRead);
             }
-
-            toast("WAV 转换成功: " + wavPath);
             return true;
 
         } catch (Exception e) {
@@ -63,7 +59,7 @@ public class PcmToWavConverter extends QScriptBase {
     }
 
     /**
-     * 简化版本 - 使用默认参数 (24000Hz, 单声道, 16位)
+     * 简化版本 - 使用默认参数 (16000Hz, 单声道, 16位)
      * 
      * @param pcmPath PCM 文件路径
      * @param wavPath WAV 输出文件路径

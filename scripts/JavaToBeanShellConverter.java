@@ -35,6 +35,7 @@ import java.util.Map;
 import java.util.HashMap;
 import java.util.UUID;
 import java.util.Properties;
+import java.util.Comparator;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
@@ -111,6 +112,13 @@ public class JavaToBeanShellConverter {
         // Create dist/scriptName directory structure
         Path distRoot = projectRoot.resolve("dist");
         Path scriptDir = distRoot.resolve(scriptName);
+        
+        // Delete existing script directory if exists (clean build)
+        if (Files.exists(scriptDir)) {
+            System.out.println("Cleaning existing script directory: " + scriptDir);
+            deleteDirectory(scriptDir);
+        }
+        
         Files.createDirectories(scriptDir);
         
         // 先转换所有子目录(constants, utils等),再转换 Main.java
@@ -119,7 +127,7 @@ public class JavaToBeanShellConverter {
         
         // Convert Main.java to scriptName/main.java
         if (Files.exists(mainFile)) {
-            String mainOutput = convertFile(mainFile, projectRoot, scriptPath);
+            String mainOutput = convertFile(mainFile, projectRoot, scriptPath, true);
             Path mainOutputPath = scriptDir.resolve("main.java");
             Files.writeString(mainOutputPath, mainOutput);
             System.out.println("Generated: " + mainOutputPath);
@@ -132,6 +140,23 @@ public class JavaToBeanShellConverter {
         
         System.out.println("\nConversion successful!");
         System.out.println("Script output: " + scriptDir);
+    }
+
+    /**
+     * Recursively delete a directory and all its contents
+     */
+    private static void deleteDirectory(Path directory) throws IOException {
+        if (Files.exists(directory)) {
+            Files.walk(directory)
+                .sorted(Comparator.reverseOrder())
+                .forEach(path -> {
+                    try {
+                        Files.delete(path);
+                    } catch (IOException e) {
+                        System.err.println("Failed to delete: " + path + ": " + e.getMessage());
+                    }
+                });
+        }
     }
 
     /**
@@ -232,10 +257,15 @@ public class JavaToBeanShellConverter {
                         .forEach(javaFile -> {
                             try {
                                 String fileName = javaFile.getFileName().toString();
-                                String content = convertFile(javaFile, projectRoot, scriptRoot);
-                                Path outputFile = outputDir.resolve(fileName);
-                                Files.writeString(outputFile, content);
-                                System.out.println("Generated: " + outputFile);
+                                String content = convertFile(javaFile, projectRoot, scriptRoot, false);
+                                // Only generate file if content is not null (not empty)
+                                if (content != null) {
+                                    Path outputFile = outputDir.resolve(fileName);
+                                    Files.writeString(outputFile, content);
+                                    System.out.println("Generated: " + outputFile);
+                                } else {
+                                    System.out.println("Skipped (empty): " + scriptRoot.relativize(javaFile));
+                                }
                             } catch (IOException e) {
                                 System.err.println("Error converting " + javaFile + ": " + e.getMessage());
                             }
@@ -251,8 +281,9 @@ public class JavaToBeanShellConverter {
 
     /**
      * Convert a single Java file to BeanShell format
+     * @param isMainFile Whether this is the Main.java file (only main.java should generate global instances)
      */
-    private static String convertFile(Path javaFile, Path projectRoot, Path scriptRoot) throws IOException {
+    private static String convertFile(Path javaFile, Path projectRoot, Path scriptRoot, boolean isMainFile) throws IOException {
         FileInputStream in = new FileInputStream(javaFile.toFile());
         
         // Parse the Java file
@@ -285,14 +316,16 @@ public class JavaToBeanShellConverter {
         // 先收集所有常量类的映射关系（从依赖文件中）
         collectClassNameMappings(cu, scriptRoot);
         
-        // STEP 1: Generate global instances FIRST (before load statements)
+        // STEP 1: Generate global instances FIRST (ONLY in main.java)
         // This ensures imported files can access these global variables
-        List<String> globalInstances = extractGlobalInstances(cu, scriptRoot);
-        if (!globalInstances.isEmpty()) {
-            for (String instanceStmt : globalInstances) {
-                beanShellCode.append(instanceStmt).append("\n");
+        if (isMainFile) {
+            List<String> globalInstances = extractGlobalInstances(cu, scriptRoot);
+            if (!globalInstances.isEmpty()) {
+                for (String instanceStmt : globalInstances) {
+                    beanShellCode.append(instanceStmt).append("\n");
+                }
+                beanShellCode.append("\n");
             }
-            beanShellCode.append("\n");
         }
         
         // STEP 2: Extract and convert imports to load() calls
@@ -304,12 +337,28 @@ public class JavaToBeanShellConverter {
             beanShellCode.append("\n");
         }
 
-        // Process all classes annotated with @ScriptMethods
+        // Process all classes annotated with @ScriptMethods or @RootCode
         cu.findAll(ClassOrInterfaceDeclaration.class).forEach(classDecl -> {
             boolean hasScriptMethodsAnnotation = classDecl.getAnnotations().stream()
                     .anyMatch(anno -> anno.getNameAsString().equals("ScriptMethods"));
             boolean hasGlobalInstanceAnnotation = classDecl.getAnnotations().stream()
                     .anyMatch(anno -> anno.getNameAsString().equals("GlobalInstance"));
+            boolean hasRootCodeAnnotation = classDecl.getAnnotations().stream()
+                    .anyMatch(anno -> anno.getNameAsString().equals("RootCode"));
+
+            // Handle @RootCode class: extract all methods' bodies to root level
+            if (hasRootCodeAnnotation) {
+                classDecl.getMethods().forEach(method -> {
+                    // Extract method body statements directly
+                    if (method.getBody().isPresent()) {
+                        method.getBody().get().getStatements().forEach(stmt -> {
+                            beanShellCode.append(printer.print(stmt)).append("\n");
+                        });
+                        beanShellCode.append("\n");
+                    }
+                });
+                return; // Skip further processing for @RootCode classes
+            }
 
             if (hasScriptMethodsAnnotation) {
                 // Skip @GlobalInstance classes - they are already generated as global variables
@@ -398,6 +447,15 @@ public class JavaToBeanShellConverter {
         // 替换代码中的类名引用: new ClassName() -> new Prefix_ClassName()
         String result = beanShellCode.toString();
         result = replaceClassNameReferences(result);
+        
+        // Check if the result only contains header comments and whitespace
+        // If so, mark it as empty (should not generate file)
+        String contentWithoutHeader = result
+            .replaceFirst("(?s)^//.*?DO NOT EDIT THIS FILE DIRECTLY\\s*", "")
+            .trim();
+        if (contentWithoutHeader.isEmpty()) {
+            return null; // Signal that this file should not be generated
+        }
         
         return result;
     }
@@ -504,7 +562,7 @@ public class JavaToBeanShellConverter {
 
     /**
      * Extract imports from myscript package and convert to load() statements
-     * 使用全局已加载列表进行去重,避免重复加载
+     * Skip files with @GlobalInstance annotation (they are defined in main.java)
      * 
      * 注意:由于BeanShell类定义可以重复加载,我们不再使用loaded列表
      * 每个文件都加载其直接依赖,让BeanShell自己处理重复
@@ -523,9 +581,32 @@ public class JavaToBeanShellConverter {
                 // 提取完整路径: me.mm.qs.myscript.utils.MessageHandler -> utils/MessageHandler
                 String relativePath = importName.substring("me.mm.qs.myscript.".length());
                 String filePath = relativePath.replace('.', '/');
+                Path javaFile = scriptRoot.resolve(filePath + ".java");
                 
-                // 不再检查loaded,直接生成load语句
-                // BeanShell类定义可以重复加载
+                // Check if the file has @GlobalInstance annotation - skip if it does
+                if (Files.exists(javaFile)) {
+                    try {
+                        FileInputStream in = new FileInputStream(javaFile.toFile());
+                        ParseResult<CompilationUnit> parseResult = new JavaParser(new ParserConfiguration()).parse(in);
+                        in.close();
+                        
+                        if (parseResult.isSuccessful()) {
+                            CompilationUnit importedCu = parseResult.getResult().get();
+                            boolean hasGlobalInstance = importedCu.findAll(ClassOrInterfaceDeclaration.class).stream()
+                                .anyMatch(classDecl -> classDecl.getAnnotations().stream()
+                                    .anyMatch(anno -> anno.getNameAsString().equals("GlobalInstance")));
+                            
+                            // Skip files with @GlobalInstance - they are already in main.java
+                            if (hasGlobalInstance) {
+                                return;
+                            }
+                        }
+                    } catch (IOException e) {
+                        // Ignore and generate load statement anyway
+                    }
+                }
+                
+                // Generate load statement for non-@GlobalInstance files
                 String loadCall = String.format("load(appPath + \"/%s.java\");", filePath);
                 loadStatements.add(loadCall);
             }
@@ -535,7 +616,7 @@ public class JavaToBeanShellConverter {
     }
     
     /**
-     * Scan imported classes and generate global instance initialization for @GlobalInstance annotated classes
+     * Scan ALL Java files in scriptRoot and generate global instance initialization for @GlobalInstance annotated classes
      * Returns list of class definitions and instance initialization statements
      * e.g. "class AudioDecoderState { ... }\nAudioDecoderState = new AudioDecoderState();"
      * Also populates globalInstanceMap for static field access conversion
@@ -549,16 +630,11 @@ public class JavaToBeanShellConverter {
         printerConfig.setIndentSize(4);
         PrettyPrinter printer = new PrettyPrinter(printerConfig);
         
-        cu.getImports().forEach(importDecl -> {
-            String importName = importDecl.getNameAsString();
-            // Only process non-static imports from myscript package
-            if (!importDecl.isStatic() && importName.startsWith("me.mm.qs.myscript.")) {
-                // Get the class file path
-                String relativePath = importName.substring("me.mm.qs.myscript.".length());
-                String filePath = relativePath.replace('.', '/');
-                Path javaFile = scriptRoot.resolve(filePath + ".java");
-                
-                if (Files.exists(javaFile)) {
+        // Scan entire scriptRoot directory for @GlobalInstance classes
+        try {
+            Files.walk(scriptRoot)
+                .filter(path -> path.toString().endsWith(".java"))
+                .forEach(javaFile -> {
                     try {
                         FileInputStream in = new FileInputStream(javaFile.toFile());
                         ParseResult<CompilationUnit> parseResult = new JavaParser(new ParserConfiguration()).parse(in);
@@ -630,9 +706,10 @@ public class JavaToBeanShellConverter {
                     } catch (IOException e) {
                         // Ignore errors
                     }
-                }
-            }
-        });
+                });
+        } catch (IOException e) {
+            System.err.println("Error scanning for @GlobalInstance classes: " + e.getMessage());
+        }
         
         return instanceStatements;
     }

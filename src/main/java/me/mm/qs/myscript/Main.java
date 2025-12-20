@@ -12,6 +12,8 @@ import me.mm.qs.myscript.utils.SilkAudioDecoder;
 import me.mm.qs.myscript.utils.PcmToWavConverter;
 import me.mm.qs.myscript.utils.AudioDecoderState;
 
+import java.io.File;
+
 import static me.mm.qs.script.Globals.*;
 
 /**
@@ -19,16 +21,13 @@ import static me.mm.qs.script.Globals.*;
  * This is the entry file that will be converted to main.java.
  */
 @ScriptInfo(
-    name = "示例脚本",
-    author = "Your Name",
+    name = "语音转换",
+    author = "木木",
     version = "1.0",
-    description = "这是一个示例脚本，演示如何使用 QStory BeanShell 脚本开发框架。\n" +
-                  "支持的功能：\n" +
-                  "- 菜单指令\n" +
-                  "- @提醒\n" +
-                  "- 回复消息\n" +
-                  "- 私聊功能\n" +
-                  "\n发送 '菜单' 查看使用说明",
+    description =
+            """
+            将别人发的QQ语音保存为可以直接听的文件
+            """ ,
     tags = "群聊辅助,娱乐功能"
 )
 @ScriptMethods
@@ -95,12 +94,8 @@ public class Main extends QScriptBase {
 
     @Override
     public void onCreateMenu(MessageData msg) {
-        MessageType type = new MessageType();
-        if (msg.IsGroup) {
-            addMenuItem("仅群", "showGroup");
-        }
         // 为语音消息添加解码菜单
-        if (msg.MessageType == type.VOICE) {
+        if (msg.MessageType == MessageType.VOICE) {
 //            addMenuItem("PCM", "saveVoice");
             addMenuItem("WAV", "saveVoiceAsWav");
         }
@@ -119,28 +114,27 @@ public class Main extends QScriptBase {
     // Custom menu callback - 解码语音为WAV（可直接播放）
     public void saveVoiceAsWav(MessageData msg) {
         if (msg.MessageType == MessageType.VOICE) {
-            String pcmPath = audioDecoder.decodeVoiceMessage(msg.LocalPath);
-            if (pcmPath == null) {
-                toast("解码失败");
-                return;
-            }
-            //删除源文件
-            context.deleteFile(pcmPath);
-            
-            // 第二步：转换为 WAV（使用动态采样率和位深度）
-            String wavPath = pcmPath.replace(".pcm", ".wav");
-            toast("开始转换: " + pcmPath);
-            // 直接访问静态字段
-            boolean success = wavConverter.convertPcmToWav(
-                pcmPath, 
-                wavPath, 
-                AudioDecoderState.lastSampleRate, 
-                AudioDecoderState.lastChannels, 
-                AudioDecoderState.lastBitDepth
-            );
-            if (success) {
-                toast("已保存为WAV: " + wavPath);
-                toast("采样率: " + AudioDecoderState.lastSampleRate + " Hz");
+            String pcmPath = null;
+            try {
+                 pcmPath = audioDecoder.decodeVoiceMessage(msg.LocalPath);
+                if (pcmPath == null) {
+                    toast("解码失败");
+                    return;
+                }
+
+                String wavPath = pcmPath.replace(".pcm", ".wav");
+
+                boolean success = wavConverter.convertPcmToWav(
+                    pcmPath,
+                    wavPath,
+                    AudioDecoderState.lastSampleRate,
+                    AudioDecoderState.lastChannels,
+                    AudioDecoderState.lastBitDepth
+                );
+            } finally {
+                if (pcmPath != null) {
+                    new File(pcmPath).delete();
+                }
             }
         } else {
             toast("这不是语音消息");
@@ -161,10 +155,9 @@ public class Main extends QScriptBase {
 }
 
 // Global initialization code - will be placed at root level
-@ScriptMethods
+@RootCode
 class Init extends QScriptBase {
-    // This code will run at the root level when the script loads
-    @RootCode
+    // All method bodies in this class will be extracted to root level
     public void init() {
         addItem("开关加载提示", "加载提示");
         if (getString("加载提示", "开关") == null) {
