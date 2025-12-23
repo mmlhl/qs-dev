@@ -31,7 +31,7 @@ import static me.mm.qs.script.Globals.*;
     author = "木木",
     version = "1.0",
     description ="111",
-    tags = "群聊辅助,娱乐功能"
+    tags = "功能拓展"
 )
 public class Main extends QScriptBase {
     // Utility instances - will be removed in BeanShell output
@@ -49,7 +49,7 @@ public class Main extends QScriptBase {
         String qun = msg.GroupUin;
         boolean isGroup = msg.IsGroup;
         
-        if ("菜单".equals(text) && qq.equals(myUin)) {
+        /*if ("菜单".equals(text) && qq.equals(myUin)) {
             String reply = "TG频道：https://t.me/QStoryPlugin\n交流群:979938489\n---------\n这是菜单 你可以发送下面的指令来进行测试  \n艾特我\n回复我\n私聊我";
 
             if (isGroup) {
@@ -91,7 +91,7 @@ public class Main extends QScriptBase {
                     forbidden(msg.GroupUin, atUin, banTime);
                 }
             }
-        }
+        }*/
     }
 
     @Override
@@ -238,18 +238,6 @@ public class Main extends QScriptBase {
             }
         }
     }
-
-
-    // Floating window menu callback - parameters: groupUin, uin, chatType
-    public void 加载提示(String groupUin, String uin, int chatType) {
-        if (getString("加载提示", "开关") == null) {
-            putString("加载提示", "开关", "关");
-            toast("已关闭加载提示");
-        } else {
-            putString("加载提示", "开关", null);
-            toast("已开启加载提示");
-        }
-    }
 }
 
 // Global initialization code - will be placed at root level
@@ -257,9 +245,6 @@ public class Main extends QScriptBase {
 class Init extends QScriptBase {
     // All method bodies in this class will be extracted to root level
     public void init() {
-        addItem("开关加载提示", "加载提示");
-        if (getString("加载提示", "开关") == null) {
-            toast("发送 \"菜单\" 查看使用说明");
-        }
+
     }
 }
