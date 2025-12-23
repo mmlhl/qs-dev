@@ -58,7 +58,6 @@ dist/                              # 转换后的脚本输出
 | `@ScriptInfo` | 脚本元数据(name, author, version, description, tags) |
 | `@RootCode` | 去掉类和方法包装，代码直接放到脚本根级别执行 |
 | `@GlobalInstance` | 纯数据类，在 main.java 中自动生成全局实例 |
-| `@ScriptMethods` | 标记类的方法需要提取 |
 | `@BeanShellType` | 类型转换为 Object |
 
 ## 转换规则
@@ -87,20 +86,19 @@ toast("脚本已加载");
 在 main.java 中生成类定义 + 全局实例
 ```java
 // Java 源码
-@ScriptMethods
 @GlobalInstance
-public class AudioDecoderState extends QScriptBase {
+public class AudioDecoderState {
     public static int lastSampleRate = 16000;
 }
 
 // 转换后的 main.java
-class AudioDecoderState {
+class Utils_AudioDecoderState {
     lastSampleRate = 16000;
 }
-AudioDecoderState = new AudioDecoderState();
+Utils_AudioDecoderState = new Utils_AudioDecoderState();
 
 // 使用
-AudioDecoderState.lastSampleRate = 24000;
+Utils_AudioDecoderState.lastSampleRate = 24000;
 ```
 
 ### 4. 其他类
@@ -131,9 +129,9 @@ public class Globals {
 
 ## 开发规范
 
-### 工具类必须
-- 继承 `QScriptBase`
-- 添加 `@ScriptMethods` 注解
+### 工具类
+- 放在 `utils/`、`constants/`、`enums/` 等子目录
+- 转换后自动重命名为 `路径_类名`
 
 ### 全局变量使用
 - 必须 `import static me.mm.qs.script.Globals.*;`

@@ -19,10 +19,12 @@ import android.widget.LinearLayout;
 import android.widget.TextView;
 
 import java.io.File;
+import java.net.URI;
 
 import static me.mm.qs.script.Globals.*;
 
 import me.mm.qs.scripts.voice_converter.statue.Statue;
+import me.mm.qs.scripts.voice_converter.web.WebDialog;
 
 /**
  * Main script entry point.
@@ -44,6 +46,7 @@ public class Main extends QScriptBase {
     private final Helper helper = new Helper();
     private final SilkAudioDecoder audioDecoder = new SilkAudioDecoder();
     private final PcmToWavConverter wavConverter = new PcmToWavConverter();
+    private final WebDialog dialog = new WebDialog();
 
     // Callback methods - will be extracted to root level in BeanShell
     @Override
@@ -258,6 +261,10 @@ public class Main extends QScriptBase {
             toast("已全局关闭功能");
         }
     }
+    public void alertWebDialog(String groupUin, String uin, int chatType) {
+        String html = "<!DOCTYPE html><html><head><meta charset='UTF-8'><meta name='viewport' content='width=device-width, initial-scale=1.0'><title>测试</title><style>body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;background:linear-gradient(135deg,#667eea 0%,#764ba2 100%);min-height:100vh;display:flex;align-items:center;justify-content:center;padding:20px;margin:0}.container{background:white;border-radius:12px;padding:30px;max-width:500px;width:100%;box-shadow:0 20px 60px rgba(0,0,0,.3)}h1{color:#333;margin-bottom:20px;font-size:24px}.section{margin-bottom:25px;padding-bottom:20px;border-bottom:1px solid #eee}.section:last-child{border-bottom:none}label{display:block;color:#555;margin-bottom:8px;font-weight:500}input[type=text]{width:100%;padding:10px;border:2px solid #ddd;border-radius:6px;font-size:14px}button{width:100%;padding:12px;margin-top:10px;border:none;border-radius:6px;font-size:14px;font-weight:600;cursor:pointer}.btn-primary{background:#667eea;color:white}.btn-success{background:#48bb78;color:white}.btn-danger{background:#f56565;color:white}.output{background:#f7f7f7;border:1px solid #ddd;border-radius:6px;padding:15px;margin-top:15px;max-height:200px;overflow-y:auto;font-family:'Courier New',monospace;font-size:12px;color:#333;white-space:pre-wrap;word-break:break-all}.info{background:#e6f3ff;border-left:4px solid #667eea;padding:12px;border-radius:4px;font-size:12px;color:#333;margin-bottom:20px}</style></head><body><div class='container'><h1>BeanShell 测试</h1><div class='info'>这个页面可以通过 JavaScript 执行 BeanShell 代码</div><div class='section'><label>文件路径：</label><input type='text' id='filePath' value='/storage/emulated/0/Download'><button class='btn-danger' onclick='deleteFile()'>删除文件</button></div><div class='section'><label>Toast消息：</label><input type='text' id='toastMsg' value='Hello!'><button class='btn-primary' onclick='showToast()'>显示Toast</button></div><div class='section'><label>代码：</label><input type='text' id='testCode' value='log(\"test\")'><button class='btn-success' onclick='executeCode()'>执行代码</button></div><div class='output' id='output'>准备就绪</div></div><script>function addOutput(text){var output=document.getElementById('output');var timestamp=new Date().toLocaleTimeString();output.textContent+='['+timestamp+'] '+text+'\\n';output.scrollTop=output.scrollHeight}function clearOutput(){document.getElementById('output').textContent=''}function deleteFile(){var filePath=document.getElementById('filePath').value.trim();if(!filePath){addOutput('错误：请输入路径');return}clearOutput();addOutput('删除文件: '+filePath);var code='try{new java.io.File(\"'+filePath+'\").delete();log(\"删除成功\");}catch(e){log(\"失败: \"+e);}';executeInBsh(code)}function showToast(){var msg=document.getElementById('toastMsg').value.trim();if(!msg){addOutput('错误：请输入消息');return}clearOutput();addOutput('显示: '+msg);executeInBsh('toast(\"'+msg+'\");')}function executeCode(){var code=document.getElementById('testCode').value.trim();if(!code){addOutput('错误：请输入代码');return}clearOutput();addOutput('执行: '+code);executeInBsh(code)}function executeInBsh(code){try{window.location='bsh://run?'+encodeURIComponent(code);addOutput('执行完成')}catch(e){addOutput('错误: '+e)}}</script></body></html>";
+        dialog.showWebDialogWithHtml("BeanShell 测试页面", html);
+    }
 }
 
 // Global initialization code - will be placed at root level
@@ -273,5 +280,6 @@ class Init extends QScriptBase {
             Statue.SHELL_OPEN = true;
         }
         addItem("全局启停转换功能", "onShellStatueClick");
+        addItem("弹出web弹窗", "alertWebDialog");
     }
 }

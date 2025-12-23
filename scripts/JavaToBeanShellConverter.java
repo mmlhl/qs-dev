@@ -43,7 +43,7 @@ import java.util.stream.Stream;
  * Enhanced Java to BeanShell converter.
  * Features:
  * - Converts @BeanShellType annotated types to Object
- * - Extracts methods from @ScriptMethods annotated classes to root level
+ * - Handles @GlobalInstance classes (generated in main.java)
  * - Removes annotations (BeanShell doesn't support them)
  * - Recursively converts all Java files in subdirectories
  * - Outputs main.java and module files to dist/
@@ -118,6 +118,7 @@ public class JavaToBeanShellConverter {
         Path scriptDir = distRoot.resolve(scriptName);
         
         // Delete existing script directory if exists (clean build)
+
         if (Files.exists(scriptDir)) {
             System.out.println("Cleaning existing script directory: " + scriptDir);
             deleteDirectory(scriptDir);
@@ -184,8 +185,8 @@ public class JavaToBeanShellConverter {
         // Clone the method to avoid modifying the original AST
         MethodDeclaration converted = method.clone();
 
-        // Remove all annotations
-        converted.getAnnotations().clear();
+        // Remove all annotations except @JavascriptInterface (needed for Android WebView)
+        converted.getAnnotations().removeIf(anno -> !anno.getNameAsString().equals("JavascriptInterface"));
         
         // Remove 'static' modifier
         converted.setStatic(false);
@@ -235,7 +236,7 @@ public class JavaToBeanShellConverter {
     }
 
     /**
-     * Recursively convert all Java files in subdirectories
+     * Recursively convert all Java files in subdirectories and copy non-Java files
      */
     private static void convertDirectory(Path sourceDir, Path distDir, Path projectRoot, Path scriptRoot) throws IOException {
         Files.list(sourceDir)
@@ -264,6 +265,20 @@ public class JavaToBeanShellConverter {
                                 }
                             } catch (IOException e) {
                                 System.err.println("Error converting " + javaFile + ": " + e.getMessage());
+                            }
+                        });
+                    
+                    // Copy non-Java files (HTML, CSS, JS, etc)
+                    Files.list(subDir)
+                        .filter(Files::isRegularFile)
+                        .filter(file -> !file.toString().endsWith(".java"))
+                        .forEach(file -> {
+                            try {
+                                Path outputFile = outputDir.resolve(file.getFileName());
+                                Files.copy(file, outputFile, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+                                System.out.println("Copied: " + outputFile);
+                            } catch (IOException e) {
+                                System.err.println("Error copying " + file + ": " + e.getMessage());
                             }
                         });
                     
@@ -529,15 +544,9 @@ public class JavaToBeanShellConverter {
                          
                          if (parseResult.isSuccessful()) {
                              CompilationUnit cu = parseResult.getResult().get();
-                             // 找到不带 @ScriptMethods 注解的类(常量类)
+                             // 收集所有类名
                              cu.findAll(ClassOrInterfaceDeclaration.class).forEach(classDecl -> {
-                                 boolean hasScriptMethodsAnnotation = classDecl.getAnnotations().stream()
-                                         .anyMatch(anno -> anno.getNameAsString().equals("ScriptMethods"));
-                                 
-                                 if (!hasScriptMethodsAnnotation) {
-                                     // 这是一个常量类
-                                     constantClassNames.add(classDecl.getNameAsString());
-                                 }
+                                 constantClassNames.add(classDecl.getNameAsString());
                              });
                          }
                      } catch (IOException e) {
@@ -737,26 +746,17 @@ public class JavaToBeanShellConverter {
                                     .ifPresent(globalInstanceAnno -> {
                                         String className = classDecl.getNameAsString();
                                         
-                                        // Check if this class also has @ScriptMethods annotation
-                                        boolean hasScriptMethods = classDecl.getAnnotations().stream()
-                                            .anyMatch(anno -> anno.getNameAsString().equals("ScriptMethods"));
-                                        
-                                        // For constant classes (without @ScriptMethods), use renamed class name
-                                        // For data classes (with @ScriptMethods), use original class name
+                                        // 如果在子目录中，重命名为 Prefix_ClassName
                                         String varName = className;
                                         String actualClassName = className;
                                         
-                                        if (!hasScriptMethods) {
-                                            // This is a constant class, will be renamed as Prefix_ClassName
-                                            String classRelativePath = scriptRoot.relativize(javaFile.getParent()).toString();
-                                            if (!classRelativePath.isEmpty() && !classRelativePath.equals(".")) {
-                                                String pathPrefix = classRelativePath.replace(File.separatorChar, '_')
-                                                    .replace('-', '_');
-                                                pathPrefix = pathPrefix.substring(0, 1).toUpperCase() + pathPrefix.substring(1);
-                                                actualClassName = pathPrefix + "_" + className;
-                                                // For constant classes, use renamed class name as variable name
-                                                varName = actualClassName;
-                                            }
+                                        String classRelativePath = scriptRoot.relativize(javaFile.getParent()).toString();
+                                        if (!classRelativePath.isEmpty() && !classRelativePath.equals(".")) {
+                                            String pathPrefix = classRelativePath.replace(File.separatorChar, '_')
+                                                .replace('-', '_');
+                                            pathPrefix = pathPrefix.substring(0, 1).toUpperCase() + pathPrefix.substring(1);
+                                            actualClassName = pathPrefix + "_" + className;
+                                            varName = actualClassName;
                                         }
                                         
                                         // Store mapping: ClassName -> renamedClassName (for reference conversion)
@@ -765,8 +765,7 @@ public class JavaToBeanShellConverter {
                                         // Generate class definition with static fields
                                         StringBuilder classCode = new StringBuilder();
                                         
-                                        // Always generate class definition for @GlobalInstance classes
-                                        // (both @ScriptMethods and constant classes)
+                                        // Generate class definition for @GlobalInstance classes
                                         classCode.append("class ").append(actualClassName).append(" {\n");
                                         
                                         // Add static fields (without 'static' keyword in BeanShell)

@@ -1,0 +1,265 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>测试页面</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+        }
+        
+        .container {
+            background: white;
+            border-radius: 12px;
+            padding: 30px;
+            max-width: 500px;
+            width: 100%;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+        }
+        
+        h1 {
+            color: #333;
+            margin-bottom: 20px;
+            font-size: 24px;
+        }
+        
+        .section {
+            margin-bottom: 25px;
+            padding-bottom: 20px;
+            border-bottom: 1px solid #eee;
+        }
+        
+        .section:last-child {
+            border-bottom: none;
+        }
+        
+        label {
+            display: block;
+            color: #555;
+            margin-bottom: 8px;
+            font-weight: 500;
+        }
+        
+        input[type="text"],
+        input[type="number"] {
+            width: 100%;
+            padding: 10px;
+            border: 2px solid #ddd;
+            border-radius: 6px;
+            font-size: 14px;
+            transition: border-color 0.3s;
+        }
+        
+        input[type="text"]:focus,
+        input[type="number"]:focus {
+            outline: none;
+            border-color: #667eea;
+        }
+        
+        button {
+            width: 100%;
+            padding: 12px;
+            margin-top: 10px;
+            border: none;
+            border-radius: 6px;
+            font-size: 14px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+        
+        .btn-primary {
+            background: #667eea;
+            color: white;
+        }
+        
+        .btn-primary:active {
+            background: #5568d3;
+            transform: scale(0.98);
+        }
+        
+        .btn-success {
+            background: #48bb78;
+            color: white;
+        }
+        
+        .btn-success:active {
+            background: #38a169;
+            transform: scale(0.98);
+        }
+        
+        .btn-danger {
+            background: #f56565;
+            color: white;
+        }
+        
+        .btn-danger:active {
+            background: #e53e3e;
+            transform: scale(0.98);
+        }
+        
+        .output {
+            background: #f7f7f7;
+            border: 1px solid #ddd;
+            border-radius: 6px;
+            padding: 15px;
+            margin-top: 15px;
+            max-height: 200px;
+            overflow-y: auto;
+            font-family: 'Courier New', monospace;
+            font-size: 12px;
+            color: #333;
+            white-space: pre-wrap;
+            word-break: break-all;
+        }
+        
+        .info {
+            background: #e6f3ff;
+            border-left: 4px solid #667eea;
+            padding: 12px;
+            border-radius: 4px;
+            font-size: 12px;
+            color: #333;
+            margin-bottom: 20px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🚀 BeanShell 测试页面</h1>
+        
+        <div class="info">
+            💡 这个页面可以通过 JavaScript 执行 BeanShell 代码
+        </div>
+        
+        <div class="section">
+            <label for="filePath">文件路径：</label>
+            <input type="text" id="filePath" placeholder="/storage/emulated/0/Download/test.txt" value="/storage/emulated/0/Download">
+            <button class="btn-danger" onclick="deleteFile()">删除文件</button>
+        </div>
+        
+        <div class="section">
+            <label for="toastMsg">Toast 消息：</label>
+            <input type="text" id="toastMsg" placeholder="输入要显示的消息" value="Hello from WebView!">
+            <button class="btn-primary" onclick="showToast()">显示 Toast</button>
+        </div>
+        
+        <div class="section">
+            <label for="testCode">自定义代码：</label>
+            <input type="text" id="testCode" placeholder="例如: log('test')" value="log('WebView 已初始化')">
+            <button class="btn-success" onclick="executeCode()">执行代码</button>
+        </div>
+        
+        <div class="output" id="output">
+等待输出...
+        </div>
+    </div>
+
+    <script>
+        // 输出函数
+        function addOutput(text) {
+            const output = document.getElementById('output');
+            const timestamp = new Date().toLocaleTimeString();
+            output.textContent += `[${timestamp}] ${text}\n`;
+            output.scrollTop = output.scrollHeight;
+        }
+        
+        // 清空输出
+        function clearOutput() {
+            document.getElementById('output').textContent = '';
+        }
+        
+        // 删除文件
+        function deleteFile() {
+            const filePath = document.getElementById('filePath').value.trim();
+            if (!filePath) {
+                addOutput('❌ 错误：请输入文件路径');
+                return;
+            }
+            
+            clearOutput();
+            addOutput(`📂 正在删除文件: ${filePath}`);
+            
+            const code = `
+try {
+    result = new java.io.File("${filePath}").delete();
+    if (result) {
+        log("✓ 文件删除成功");
+    } else {
+        log("✗ 文件删除失败");
+    }
+} catch (e) {
+    error(e);
+    log("✗ 异常: " + e.toString());
+}
+            `;
+            
+            executeInBsh(code);
+        }
+        
+        // 显示 Toast
+        function showToast() {
+            const msg = document.getElementById('toastMsg').value.trim();
+            if (!msg) {
+                addOutput('❌ 错误：请输入消息');
+                return;
+            }
+            
+            clearOutput();
+            addOutput(`📢 显示 Toast: ${msg}`);
+            
+            const code = `toast("${msg}");`;
+            executeInBsh(code);
+        }
+        
+        // 执行自定义代码
+        function executeCode() {
+            const code = document.getElementById('testCode').value.trim();
+            if (!code) {
+                addOutput('❌ 错误：请输入代码');
+                return;
+            }
+            
+            clearOutput();
+            addOutput(`⚙️ 执行代码: ${code}`);
+            executeInBsh(code);
+        }
+        
+        // 在 BeanShell 中执行代码
+        function executeInBsh(code) {
+            try {
+                if (typeof Bsh !== 'undefined' && Bsh.eval) {
+                    Bsh.eval(code);
+                    addOutput('✅ 代码执行完成');
+                } else {
+                    addOutput('❌ Bsh 接口未初始化，使用本地执行');
+                    // 本地测试
+                    addOutput(`📝 代码: ${code}`);
+                }
+            } catch (e) {
+                addOutput(`❌ 执行失败: ${e.message}`);
+            }
+        }
+        
+        // 页面加载完成
+        window.onload = function() {
+            clearOutput();
+            addOutput('✓ 页面已加载');
+            addOutput('✓ 准备就绪，可以开始测试');
+        };
+    </script>
+</body>
+</html>
