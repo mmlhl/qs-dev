@@ -104,14 +104,11 @@ public class WebDialog extends QScriptBase {
             toast("无法获取Activity");
             return;
         }
-
-        // 必须在主线程显示对话框
         activity.runOnUiThread(new Runnable() {
             public void run() {
                 // 创建 WebView
                 final WebView webView = new WebView(context);
-                
-                // 使用自定义 WebViewClient 拦截 bsh:// 协议
+
                 webView.setWebViewClient(new WebViewClient() {
                     public boolean shouldOverrideUrlLoading(WebView view, String url) {
                         if (url != null && url.startsWith("bsh://")) {

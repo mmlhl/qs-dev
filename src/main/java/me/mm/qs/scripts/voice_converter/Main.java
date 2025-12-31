@@ -9,9 +9,9 @@ import me.mm.qs.scripts.voice_converter.utils.MessageHandler;
 import me.mm.qs.scripts.voice_converter.utils.Helper;
 import me.mm.qs.scripts.voice_converter.utils.SilkAudioDecoder;
 import me.mm.qs.scripts.voice_converter.utils.PcmToWavConverter;
+import me.mm.qs.scripts.voice_converter.utils.PcmToMp3Converter;
 import me.mm.qs.scripts.voice_converter.utils.AudioDecoderState;
 
-import android.app.Activity;
 import android.app.AlertDialog;
 import android.content.DialogInterface;
 import android.widget.EditText;
@@ -19,7 +19,8 @@ import android.widget.LinearLayout;
 import android.widget.TextView;
 
 import java.io.File;
-import java.net.URI;
+import java.lang.reflect.Method;
+import java.lang.reflect.InvocationTargetException;
 
 import static me.mm.qs.script.Globals.*;
 
@@ -46,6 +47,7 @@ public class Main extends QScriptBase {
     private final Helper helper = new Helper();
     private final SilkAudioDecoder audioDecoder = new SilkAudioDecoder();
     private final PcmToWavConverter wavConverter = new PcmToWavConverter();
+    private final PcmToMp3Converter mp3Converter = new PcmToMp3Converter();
     private final WebDialog dialog = new WebDialog();
 
     // Callback methods - will be extracted to root level in BeanShell
@@ -56,6 +58,18 @@ public class Main extends QScriptBase {
         String qq = msg.UserUin;
         String qun = msg.GroupUin;
         boolean isGroup = msg.IsGroup;
+        
+        // 测试 FFmpeg 版本
+        if ("ffmpeg版本".equals(text) && qq.equals(myUin)) {
+            String version = mp3Converter.getVersion();
+            if (version != null) {
+                toast("FFmpeg 已就绪");
+                log("[FFmpeg Version] " + version);
+            } else {
+                toast("FFmpeg 未就绪，请查看日志");
+            }
+            return;
+        }
         
         /*if ("菜单".equals(text) && qq.equals(myUin)) {
             String reply = "TG频道：https://t.me/QStoryPlugin\n交流群:979938489\n---------\n这是菜单 你可以发送下面的指令来进行测试  \n艾特我\n回复我\n私聊我";
@@ -109,6 +123,7 @@ public class Main extends QScriptBase {
 //            addMenuItem("PCM", "saveVoice");
             if (Statue.SHELL_OPEN) {
                 addMenuItem("WAV", "saveVoiceAsWav");
+                addMenuItem("MP3", "saveVoiceAsMp3");
             }
 
         }
@@ -121,6 +136,50 @@ public class Main extends QScriptBase {
             String pcmPath = audioDecoder.decodeVoiceMessage(msg.LocalPath);
         } else {
             toast("这不是语音消息");
+        }
+    }
+
+    // Custom menu callback - 解码语音为 MP3
+    public void saveVoiceAsMp3(MessageData msg) {
+        if (msg.MessageType != MessageType.VOICE) {
+            toast("这不是语音消息");
+            return;
+        }
+
+        String pcmPath = null;
+        try {
+            // 获取原始文件名（不含路径和后缀）
+            String localPath = msg.LocalPath;
+            String originalName = localPath.substring(localPath.lastIndexOf("/") + 1);
+            if (originalName.contains(".")) {
+                originalName = originalName.substring(0, originalName.lastIndexOf("."));
+            }
+
+            // 1. 先将 slk 转换为 pcm（保存在脚本目录下）
+            pcmPath = audioDecoder.decodeVoiceMessage(localPath);
+            if (pcmPath == null) {
+                toast("解码失败");
+                return;
+            }
+            log("pcmPath: " + pcmPath);
+
+            // 2. 将 pcm 转换为 mp3，保存到脚本目录
+            String mp3Path = appPath + "/" + originalName + ".mp3";
+            String result = mp3Converter.convertToMp3(pcmPath, mp3Path);
+
+            if (result != null) {
+                toast("已保存到: " + result);
+            } else {
+                toast("MP3 转换失败");
+            }
+        } catch (Exception e) {
+            error(e);
+            toast("转换失败: " + e.getMessage());
+        } finally {
+            // 删除临时 pcm 文件
+            /*if (pcmPath != null) {
+                new File(pcmPath).delete();
+            }*/
         }
     }
 
@@ -217,8 +276,66 @@ public class Main extends QScriptBase {
         });
     }
 
+    private void loadSo(String groupUin, String uin, int chatType) {
+        try {
+            Class loadClass = loader.loadClass("com.tencent.liteav.base.util.SoLoader");
+            String soPath = "/data/user/0/com.tencent.mobileqq/app_libs/";
+            String soName = "decoder";
+            
+            // 先设置库路径
+            Method setLibraryPath = loadClass.getMethod("setLibraryPath", String.class);
+            setLibraryPath.invoke(null, soPath);
+            log("setLibraryPath: " + soPath);
+            
+            // 再调用 loadLibrary(String) 静态方法
+            Method loadLibraryMethod = loadClass.getMethod("loadLibrary", String.class);
+            boolean result = (boolean) loadLibraryMethod.invoke(null, soName);
+            log("loadLibrary result: " + result);
+            
+            if (result) {
+                // 使用 DexClassLoader 加载包含 DecodeNative 类的 DEX 文件
+                String dexPath = appPath + "decoder.dex";
+                String optimizedDir = context.getDir("dex", 0).getAbsolutePath();
+                
+                dalvik.system.DexClassLoader dexLoader = new dalvik.system.DexClassLoader(
+                        dexPath, optimizedDir, null, loader);
+                
+                // 加载 DecodeNative 类并调用 silk2mp3 方法
+                Class<?> decodeNativeClass = dexLoader.loadClass("xyz.xxin.silkdecoder.DecodeNative");
+                Method silk2mp3Method = decodeNativeClass.getMethod("silk2mp3", String.class, String.class);
+                
+                String inputPcmPath = appPath + "23e84ac26c0297cd0e687b23bdf8bc73.pcm";
+                String outputMp3Path = appPath + "1.mp3";
+                
+                int decodeResult = (int) silk2mp3Method.invoke(null, inputPcmPath, outputMp3Path);
+                log("silk2mp3 decode result: " + decodeResult);
+                
+                if (decodeResult == 0) {
+                    toast("已保存到: " + outputMp3Path);
+                    log("MP3 转换成功");
+                } else {
+                    toast("MP3 转换失败，错误码: " + decodeResult);
+                    log("MP3 转换失败，错误码: " + decodeResult);
+                }
+            } else {
+                toast("加载 decoder 库失败");
+                log("加载 decoder 库失败");
+            }
+        } catch (ClassNotFoundException e) {
+            error(e);
+            log("类加载失败: " + e.getMessage());
+        } catch (NoSuchMethodException | IllegalAccessException | InvocationTargetException e) {
+            error(e);
+            log("方法调用失败: " + e.getMessage());
+        } catch (Exception e) {
+            error(e);
+            log("loadSo 异常: " + e.getMessage());
+        }
+    }
+
     // 实际执行WAV保存
     private void doSaveWav(MessageData msg, String wavPath) {
+
         String pcmPath = null;
         try {
             pcmPath = audioDecoder.decodeVoiceMessage(msg.LocalPath);
@@ -250,6 +367,8 @@ public class Main extends QScriptBase {
         }
     }
 
+
+
     private void onShellStatueClick(String groupUin, String uin, int chatType) {
         if (getString("脚本启用状态", "开关").equals("关")) {
             putString("脚本启用状态", "开关", "开");
@@ -261,9 +380,30 @@ public class Main extends QScriptBase {
             toast("已全局关闭功能");
         }
     }
+
     public void alertWebDialog(String groupUin, String uin, int chatType) {
-        String html = "<!DOCTYPE html><html><head><meta charset='UTF-8'><meta name='viewport' content='width=device-width, initial-scale=1.0'><title>测试</title><style>body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;background:linear-gradient(135deg,#667eea 0%,#764ba2 100%);min-height:100vh;display:flex;align-items:center;justify-content:center;padding:20px;margin:0}.container{background:white;border-radius:12px;padding:30px;max-width:500px;width:100%;box-shadow:0 20px 60px rgba(0,0,0,.3)}h1{color:#333;margin-bottom:20px;font-size:24px}.section{margin-bottom:25px;padding-bottom:20px;border-bottom:1px solid #eee}.section:last-child{border-bottom:none}label{display:block;color:#555;margin-bottom:8px;font-weight:500}input[type=text]{width:100%;padding:10px;border:2px solid #ddd;border-radius:6px;font-size:14px}button{width:100%;padding:12px;margin-top:10px;border:none;border-radius:6px;font-size:14px;font-weight:600;cursor:pointer}.btn-primary{background:#667eea;color:white}.btn-success{background:#48bb78;color:white}.btn-danger{background:#f56565;color:white}.output{background:#f7f7f7;border:1px solid #ddd;border-radius:6px;padding:15px;margin-top:15px;max-height:200px;overflow-y:auto;font-family:'Courier New',monospace;font-size:12px;color:#333;white-space:pre-wrap;word-break:break-all}.info{background:#e6f3ff;border-left:4px solid #667eea;padding:12px;border-radius:4px;font-size:12px;color:#333;margin-bottom:20px}</style></head><body><div class='container'><h1>BeanShell 测试</h1><div class='info'>这个页面可以通过 JavaScript 执行 BeanShell 代码</div><div class='section'><label>文件路径：</label><input type='text' id='filePath' value='/storage/emulated/0/Download'><button class='btn-danger' onclick='deleteFile()'>删除文件</button></div><div class='section'><label>Toast消息：</label><input type='text' id='toastMsg' value='Hello!'><button class='btn-primary' onclick='showToast()'>显示Toast</button></div><div class='section'><label>代码：</label><input type='text' id='testCode' value='log(\"test\")'><button class='btn-success' onclick='executeCode()'>执行代码</button></div><div class='output' id='output'>准备就绪</div></div><script>function addOutput(text){var output=document.getElementById('output');var timestamp=new Date().toLocaleTimeString();output.textContent+='['+timestamp+'] '+text+'\\n';output.scrollTop=output.scrollHeight}function clearOutput(){document.getElementById('output').textContent=''}function deleteFile(){var filePath=document.getElementById('filePath').value.trim();if(!filePath){addOutput('错误：请输入路径');return}clearOutput();addOutput('删除文件: '+filePath);var code='try{new java.io.File(\"'+filePath+'\").delete();log(\"删除成功\");}catch(e){log(\"失败: \"+e);}';executeInBsh(code)}function showToast(){var msg=document.getElementById('toastMsg').value.trim();if(!msg){addOutput('错误：请输入消息');return}clearOutput();addOutput('显示: '+msg);executeInBsh('toast(\"'+msg+'\");')}function executeCode(){var code=document.getElementById('testCode').value.trim();if(!code){addOutput('错误：请输入代码');return}clearOutput();addOutput('执行: '+code);executeInBsh(code)}function executeInBsh(code){try{window.location='bsh://run?'+encodeURIComponent(code);addOutput('执行完成')}catch(e){addOutput('错误: '+e)}}</script></body></html>";
-        dialog.showWebDialogWithHtml("BeanShell 测试页面", html);
+        try {
+            // 使用 appPath 获取脚本目录
+            String filePath = appPath + "/web/test.html";
+            java.io.File file = new java.io.File(filePath);
+            
+            if (!file.exists()) {
+                toast("文件不存在: " + filePath);
+                return;
+            }
+            
+            // 读取文件内容
+            java.io.FileInputStream fis = new java.io.FileInputStream(file);
+            byte[] data = new byte[(int) file.length()];
+            fis.read(data);
+            fis.close();
+            String htmlContent = new String(data, "UTF-8");
+            
+            dialog.showWebDialogWithHtml("BeanShell 测试页面", htmlContent);
+        } catch (Exception e) {
+            error(e);
+            toast("加载页面失败: " + e.getMessage());
+        }
     }
 }
 
@@ -281,5 +421,6 @@ class Init extends QScriptBase {
         }
         addItem("全局启停转换功能", "onShellStatueClick");
         addItem("弹出web弹窗", "alertWebDialog");
+        addItem("加载so文件", "loadSo");
     }
 }

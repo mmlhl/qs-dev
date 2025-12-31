@@ -147,7 +147,7 @@
         
         <div class="section">
             <label for="filePath">文件路径：</label>
-            <input type="text" id="filePath" placeholder="/storage/emulated/0/Download/test.txt" value="/storage/emulated/0/Download">
+            <input type="text" id="filePath" placeholder="/storage/emulated/0/Download/test.txt" value="/storage/emulated/0/Download/test.txt">
             <button class="btn-danger" onclick="deleteFile()">删除文件</button>
         </div>
         
@@ -193,19 +193,8 @@
             clearOutput();
             addOutput(`📂 正在删除文件: ${filePath}`);
             
-            const code = `
-try {
-    result = new java.io.File("${filePath}").delete();
-    if (result) {
-        log("✓ 文件删除成功");
-    } else {
-        log("✗ 文件删除失败");
-    }
-} catch (e) {
-    error(e);
-    log("✗ 异常: " + e.toString());
-}
-            `;
+            // 单行代码避免换行符问题
+            const code = `f = new java.io.File("${filePath}"); if(f.exists()) { if(f.delete()) { toast("删除成功"); } else { toast("删除失败"); } } else { toast("文件不存在"); }`;
             
             executeInBsh(code);
         }
@@ -238,19 +227,13 @@ try {
             executeInBsh(code);
         }
         
-        // 在 BeanShell 中执行代码
+        // 在 BeanShell 中执行代码（使用 URL 拦截方式）
         function executeInBsh(code) {
             try {
-                if (typeof Bsh !== 'undefined' && Bsh.eval) {
-                    Bsh.eval(code);
-                    addOutput('✅ 代码执行完成');
-                } else {
-                    addOutput('❌ Bsh 接口未初始化，使用本地执行');
-                    // 本地测试
-                    addOutput(`📝 代码: ${code}`);
-                }
+                window.location = 'bsh://run?' + encodeURIComponent(code);
+                addOutput('✅ 代码执行完成');
             } catch (e) {
-                addOutput(`❌ 执行失败: ${e.message}`);
+                addOutput('❌ 执行失败: ' + e.message);
             }
         }
         

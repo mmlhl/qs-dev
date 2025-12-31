@@ -111,6 +111,8 @@ public class SilkAudioDecoder extends QScriptBase {
 
             int sampleRate = getSampleRate(sampleRateIndex);
             AudioDecoderState.lastSampleRate = sampleRate;
+            AudioDecoderState.lastChannels = 1;   // Silk 始终是单声道
+            AudioDecoderState.lastBitDepth = 16;  // Silk 解码输出始终是 16 位
 
             // 输出路径
             String fileName = localPath.substring(localPath.lastIndexOf("/") + 1);
@@ -181,6 +183,16 @@ public class SilkAudioDecoder extends QScriptBase {
                 }
             }
             fos.flush();
+            
+            log("[Silk] 解码完成, 帧数: " + frameCount + ", 输出: " + pcmPath);
+            
+            // 检查文件是否真的创建成功
+            File pcmFile = new File(pcmPath);
+            if (!pcmFile.exists() || pcmFile.length() == 0) {
+                log("[Silk] PCM 文件创建失败或为空");
+                return null;
+            }
+            log("[Silk] PCM 文件大小: " + pcmFile.length() + " bytes");
             
             // 释放解码器
             if (codecHandle != 0) {

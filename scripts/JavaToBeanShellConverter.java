@@ -465,8 +465,18 @@ public class JavaToBeanShellConverter {
                     beanShellCode.append("/**").append(classDecl.getJavadocComment().get().getContent()).append("*/\n");
                 }
                 
-                // 输出类定义
-                beanShellCode.append("class ").append(uniqueClassName).append(" {\n");
+                // 输出类定义（保留 implements）
+                beanShellCode.append("class ").append(uniqueClassName);
+                
+                // 保留 implements 接口
+                if (!classDecl.getImplementedTypes().isEmpty()) {
+                    beanShellCode.append(" implements ");
+                    List<String> interfaces = new ArrayList<>();
+                    classDecl.getImplementedTypes().forEach(impl -> interfaces.add(impl.toString()));
+                    beanShellCode.append(String.join(", ", interfaces));
+                }
+                
+                beanShellCode.append(" {\n");
                 
                 // 添加所有字段（静态和非静态）
                 classDecl.getFields().forEach(field -> {
@@ -1124,6 +1134,11 @@ public class JavaToBeanShellConverter {
         if (type.isClassOrInterfaceType()) {
             ClassOrInterfaceType classType = type.asClassOrInterfaceType();
             String typeName = classType.getNameAsString();
+            
+            // 如果类型有 scope（如 java.lang.reflect.Method），不转换
+            if (classType.getScope().isPresent()) {
+                return;
+            }
             
             // Check if this is a BeanShell type
             if (BEANSHELL_TYPES.contains(typeName)) {

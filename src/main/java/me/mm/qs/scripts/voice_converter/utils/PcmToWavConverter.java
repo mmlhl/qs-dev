@@ -1,6 +1,7 @@
 package me.mm.qs.scripts.voice_converter.utils;
 
 import me.mm.qs.script.QScriptBase;
+import me.mm.qs.scripts.voice_converter.utils.AudioDecoderState;
 
 import java.io.FileInputStream;
 import java.io.FileOutputStream;
@@ -57,25 +58,31 @@ public class PcmToWavConverter extends QScriptBase {
     }
 
     /**
-     * 简化版本 - 使用默认参数 (16000Hz, 单声道, 16位)
+     * 简化版本 - 使用 AudioDecoderState 中的共享参数
      * 
      * @param pcmPath PCM 文件路径
      * @param wavPath WAV 输出文件路径
      * @return 转换是否成功
      */
     public boolean convertPcmToWav(String pcmPath, String wavPath) {
-        return convertPcmToWav(pcmPath, wavPath, 16000, 1, 16);
+        int sampleRate = AudioDecoderState.lastSampleRate > 0 ? AudioDecoderState.lastSampleRate : 16000;
+        int channels = AudioDecoderState.lastChannels > 0 ? AudioDecoderState.lastChannels : 1;
+        int bitDepth = AudioDecoderState.lastBitDepth > 0 ? AudioDecoderState.lastBitDepth : 16;
+        return convertPcmToWav(pcmPath, wavPath, sampleRate, channels, bitDepth);
     }
 
     /**
-     * 自动生成 WAV 文件名
+     * 自动生成 WAV 文件名 - 使用 AudioDecoderState 中的共享参数
      * 
      * @param pcmPath PCM 文件路径
      * @return WAV 文件路径，失败返回 null
      */
     public String convertPcmToWav(String pcmPath) {
         String wavPath = pcmPath.replace(".pcm", ".wav");
-        if (convertPcmToWav(pcmPath, wavPath)) {
+        int sampleRate = AudioDecoderState.lastSampleRate > 0 ? AudioDecoderState.lastSampleRate : 16000;
+        int channels = AudioDecoderState.lastChannels > 0 ? AudioDecoderState.lastChannels : 1;
+        int bitDepth = AudioDecoderState.lastBitDepth > 0 ? AudioDecoderState.lastBitDepth : 16;
+        if (convertPcmToWav(pcmPath, wavPath, sampleRate, channels, bitDepth)) {
             return wavPath;
         }
         return null;
